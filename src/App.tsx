@@ -9,6 +9,7 @@ import {
   FolderOpen,
   History,
   Plus,
+  RefreshCw,
   RotateCcw,
   Settings,
   Star,
@@ -41,14 +42,17 @@ import {
   showPanelContextMenu,
   startPanelDrag
 } from "./runtime/tauri";
+import { APP_VERSION } from "./version";
 
 const priorityOptions: TaskPriority[] = ["urgent", "high", "medium", "low"];
 const focusLimitOptions: FocusLimit[] = [3, 5, 10];
 const COLLAPSE_DELAY_MS = 220;
 const COLLAPSE_ANIMATION_MS = 210;
 const FULLSCREEN_CHECK_INTERVAL_MS = 1200;
-const TRIGGER_CHECK_INTERVAL_MS = 16;
+const TRIGGER_ACTIVE_CHECK_INTERVAL_MS = 16;
+const TRIGGER_IDLE_CHECK_INTERVAL_MS = 140;
 const COLLAPSED_HOVER_DWELL_MS = 180;
+const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/releases/latest";
 
 interface ImportPreviewRow {
   id: string;
@@ -59,6 +63,11 @@ interface ImportPreviewRow {
   dueAt: string;
   priority: TaskPriority;
   notes: string;
+}
+
+interface LatestReleaseResponse {
+  tag_name?: string;
+  html_url?: string;
 }
 
 export function App() {
@@ -145,60 +154,79 @@ export function App() {
     if (!isTauriRuntime()) return;
 
     let isMounted = true;
-    const interval = window.setInterval(() => {
-      if (!isMounted || lastAutoHiddenRef.current) return;
-      if ((isExpanded || forceExpanded) && !isDraggingPanelRef.current) return;
+    let timer: number | null = null;
 
-      void getPanelPointerState()
-        .then((state) => {
-          if (!isMounted || !state) return;
+    async function pollPointerState() {
+      let nextInterval = TRIGGER_IDLE_CHECK_INTERVAL_MS;
 
-          const previousButtons = pointerButtonsRef.current;
-          const shouldAcceptCollapsedInput = !isExpanded && !forceExpanded && state.inTrigger;
-          if (collapsedInputRef.current !== shouldAcceptCollapsedInput) {
-            collapsedInputRef.current = shouldAcceptCollapsedInput;
-            void setPanelAcceptsInput(shouldAcceptCollapsedInput);
-          }
+      if (!isMounted) return;
+      if (lastAutoHiddenRef.current || ((isExpanded || forceExpanded) && !isDraggingPanelRef.current)) {
+        timer = window.setTimeout(() => void pollPointerState(), nextInterval);
+        return;
+      }
 
-          if (state.inTrigger && state.rightDown && !previousButtons.rightDown) {
+      try {
+        const state = await getPanelPointerState();
+        if (!isMounted || !state) return;
+
+        const previousButtons = pointerButtonsRef.current;
+        const shouldAcceptCollapsedInput = !isExpanded && !forceExpanded && state.inTrigger;
+        if (collapsedInputRef.current !== shouldAcceptCollapsedInput) {
+          collapsedInputRef.current = shouldAcceptCollapsedInput;
+          void setPanelAcceptsInput(shouldAcceptCollapsedInput);
+        }
+
+        if (state.inTrigger && state.rightDown && !previousButtons.rightDown) {
+          hoverStartRef.current = null;
+          void showPanelContextMenu();
+        }
+
+        if (state.inTrigger && state.leftDown && !previousButtons.leftDown) {
+          hoverStartRef.current = null;
+          isDraggingPanelRef.current = true;
+          void startPanelDrag();
+        }
+
+        if (!state.leftDown && previousButtons.leftDown && isDraggingPanelRef.current) {
+          isDraggingPanelRef.current = false;
+        }
+
+        const isBusyWithButtons = state.leftDown || state.rightDown || isDraggingPanelRef.current;
+        if (!isExpanded && !forceExpanded && state.inTrigger && !isBusyWithButtons) {
+          hoverStartRef.current ??= Date.now();
+          nextInterval = TRIGGER_ACTIVE_CHECK_INTERVAL_MS;
+          if (Date.now() - hoverStartRef.current >= COLLAPSED_HOVER_DWELL_MS) {
+            expandPanel();
             hoverStartRef.current = null;
-            void showPanelContextMenu();
           }
+        } else if (!state.inTrigger) {
+          hoverStartRef.current = null;
+        }
 
-          if (state.inTrigger && state.leftDown && !previousButtons.leftDown) {
-            hoverStartRef.current = null;
-            isDraggingPanelRef.current = true;
-            void startPanelDrag();
-          }
+        if (state.inTrigger || isBusyWithButtons) {
+          nextInterval = TRIGGER_ACTIVE_CHECK_INTERVAL_MS;
+        }
 
-          if (!state.leftDown && previousButtons.leftDown && isDraggingPanelRef.current) {
-            isDraggingPanelRef.current = false;
-          }
+        pointerButtonsRef.current = {
+          leftDown: state.leftDown,
+          rightDown: state.rightDown
+        };
+      } catch {
+        // Cursor polling is a Windows overlay nicety; ignore transient failures.
+      }
 
-          const isBusyWithButtons = state.leftDown || state.rightDown || isDraggingPanelRef.current;
-          if (!isExpanded && !forceExpanded && state.inTrigger && !isBusyWithButtons) {
-            hoverStartRef.current ??= Date.now();
-            if (Date.now() - hoverStartRef.current >= COLLAPSED_HOVER_DWELL_MS) {
-              expandPanel();
-              hoverStartRef.current = null;
-            }
-          } else if (!state.inTrigger) {
-            hoverStartRef.current = null;
-          }
+      if (isMounted) {
+        timer = window.setTimeout(() => void pollPointerState(), nextInterval);
+      }
+    }
 
-          pointerButtonsRef.current = {
-            leftDown: state.leftDown,
-            rightDown: state.rightDown
-          };
-        })
-        .catch(() => {
-          // Cursor polling is a Windows overlay nicety; ignore transient failures.
-        });
-    }, TRIGGER_CHECK_INTERVAL_MS);
+    timer = window.setTimeout(() => void pollPointerState(), 0);
 
     return () => {
       isMounted = false;
-      window.clearInterval(interval);
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
     };
   }, [forceExpanded, isExpanded]);
 
@@ -819,6 +847,7 @@ function SettingsPanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [isAutostartEnabled, setIsAutostartEnabled] = useState(false);
   const [isAutostartPending, setIsAutostartPending] = useState(false);
+  const [isUpdatePending, setIsUpdatePending] = useState(false);
   const [dataPath, setDataPath] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -903,6 +932,46 @@ function SettingsPanel() {
       await hidePanelForMinutes(minutes);
     } catch {
       setMessage(ui.settings.hideFailed);
+    }
+  }
+
+  async function handleCheckUpdates() {
+    setIsUpdatePending(true);
+    setMessage(ui.settings.checkingUpdates);
+    try {
+      const response = await fetch(RELEASES_API_URL, {
+        headers: {
+          Accept: "application/vnd.github+json"
+        }
+      });
+
+      if (response.status === 404) {
+        setMessage(ui.settings.noReleaseFound);
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Update check failed: ${response.status}`);
+      }
+
+      const release = (await response.json()) as LatestReleaseResponse;
+      const latestVersion = normalizeVersion(release.tag_name ?? "");
+      if (!latestVersion) {
+        setMessage(ui.settings.noReleaseFound);
+        return;
+      }
+
+      if (compareVersions(latestVersion, APP_VERSION) > 0) {
+        setMessage(formatTemplate(ui.settings.updateAvailable, {
+          version: latestVersion,
+          url: release.html_url ?? "https://github.com/xy-tsuki/deadline-panel/releases"
+        }));
+      } else {
+        setMessage(formatTemplate(ui.settings.upToDate, { version: APP_VERSION }));
+      }
+    } catch {
+      setMessage(ui.settings.updateCheckFailed);
+    } finally {
+      setIsUpdatePending(false);
     }
   }
 
@@ -993,6 +1062,10 @@ function SettingsPanel() {
             <button type="button" className="text-button" onClick={() => void handleBackup()}>
               <Database aria-hidden="true" />
               {ui.settings.backup}
+            </button>
+            <button type="button" className="text-button" disabled={isUpdatePending} onClick={() => void handleCheckUpdates()}>
+              <RefreshCw aria-hidden="true" />
+              {ui.settings.checkUpdates}
             </button>
           </div>
 
@@ -1353,6 +1426,27 @@ function getDueTone(isoDate: string): "overdue" | "today" | "soon" | "normal" {
   if (diff <= oneDay) return "today";
   if (diff <= oneDay * 3) return "soon";
   return "normal";
+}
+
+function normalizeVersion(version: string): string {
+  return version.trim().replace(/^v/i, "");
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = normalizeVersion(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeVersion(right).split(".").map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+
+  return 0;
+}
+
+function formatTemplate(template: string, values: Record<string, string>): string {
+  return Object.entries(values).reduce((result, [key, value]) => result.split(`{${key}}`).join(value), template);
 }
 
 function isInteractiveTarget(target: EventTarget): boolean {

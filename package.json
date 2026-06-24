@@ -1,6 +1,6 @@
 {
   "name": "deadline-panel",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build && node scripts/patch-nsis-update-mode.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
