@@ -124,7 +124,13 @@ const strings = {
       hide30: "隐藏 30 分钟",
       hide60: "隐藏 60 分钟",
       dataDir: "数据目录",
-      backup: "备份数据库"
+      backup: "备份数据库",
+      checkUpdates: "检查更新",
+      checkingUpdates: "正在检查更新...",
+      updateAvailable: "发现新版本 {version}：{url}",
+      upToDate: "已是最新版本 {version}",
+      noReleaseFound: "还没有可用的发布版本",
+      updateCheckFailed: "检查更新失败"
     },
     import: {
       title: "导入",
@@ -253,7 +259,13 @@ const strings = {
       hide30: "30分隠す",
       hide60: "60分隠す",
       dataDir: "データフォルダ",
-      backup: "DBバックアップ"
+      backup: "DBバックアップ",
+      checkUpdates: "更新を確認",
+      checkingUpdates: "更新を確認しています...",
+      updateAvailable: "新しいバージョン {version} があります: {url}",
+      upToDate: "最新バージョンです ({version})",
+      noReleaseFound: "利用可能なリリースはまだありません",
+      updateCheckFailed: "更新確認に失敗しました"
     },
     import: {
       title: "インポート",
@@ -382,7 +394,13 @@ const strings = {
       hide30: "Hide 30 min",
       hide60: "Hide 60 min",
       dataDir: "Data folder",
-      backup: "Back up DB"
+      backup: "Back up DB",
+      checkUpdates: "Check updates",
+      checkingUpdates: "Checking for updates...",
+      updateAvailable: "New version {version} available: {url}",
+      upToDate: "You're on the latest version ({version})",
+      noReleaseFound: "No release is available yet",
+      updateCheckFailed: "Update check failed"
     },
     import: {
       title: "Import",

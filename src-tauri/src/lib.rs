@@ -17,10 +17,14 @@ use tauri::{
 use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
+    System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    },
     UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON},
     UI::WindowsAndMessaging::{
-        GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, IsIconic, IsWindowVisible,
-        SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
+        IsIconic, IsWindowVisible, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
     },
 };
 
@@ -43,6 +47,26 @@ struct PanelState {
     auto_hidden: bool,
     expanded: bool,
     dragging: bool,
+    hide_token: u64,
+}
+
+struct NativeMenuLabels {
+    show_panel: &'static str,
+    pause_panel: &'static str,
+    hide_15: &'static str,
+    hide_30: &'static str,
+    hide_60: &'static str,
+    reposition: &'static str,
+    quit: &'static str,
+}
+
+struct SeedTaskSpec {
+    id: &'static str,
+    title: &'static str,
+    day_offset: i64,
+    due_time: &'static str,
+    priority: &'static str,
+    notes: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,10 +239,17 @@ fn get_app_setting(
 fn set_app_setting(
     key: String,
     value: String,
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|error| error.to_string())?;
     set_app_setting_value(&db, &key, &value).map_err(|error| error.to_string())?;
+    drop(db);
+
+    if key == "app_language" {
+        refresh_tray_menu(&app);
+    }
+
     Ok(())
 }
 
@@ -290,6 +321,7 @@ fn set_panel_expanded(
 fn hide_panel_temporarily(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
     {
         let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.hide_token = panel.hide_token.wrapping_add(1);
         panel.manual_hidden = true;
         panel.expanded = false;
     }
@@ -303,11 +335,13 @@ fn hide_panel_for_minutes(minutes: u64, app: AppHandle) -> Result<(), String> {
 
 fn hide_panel_for_duration(minutes: u64, app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    {
+    let hide_token = {
         let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.hide_token = panel.hide_token.wrapping_add(1);
         panel.manual_hidden = true;
         panel.expanded = false;
-    }
+        panel.hide_token
+    };
     sync_panel_visibility(app)?;
 
     let app = app.clone();
@@ -315,6 +349,9 @@ fn hide_panel_for_duration(minutes: u64, app: &AppHandle) -> Result<(), String> 
         thread::sleep(Duration::from_secs(minutes.saturating_mul(60)));
         let state = app.state::<AppState>();
         if let Ok(mut panel) = state.panel.lock() {
+            if panel.hide_token != hide_token {
+                return;
+            }
             panel.manual_hidden = false;
             panel.expanded = false;
         }
@@ -492,6 +529,7 @@ pub fn run() {
         .setup(|app| {
             let db_path = database_path(app.handle())?;
             let db = Connection::open(&db_path).map_err(|error| error.to_string())?;
+            configure_database(&db).map_err(|error| error.to_string())?;
             initialize_database(&db).map_err(|error| error.to_string())?;
             position_main_window(app, &db)?;
             app.manage(AppState {
@@ -502,6 +540,7 @@ pub fn run() {
                     auto_hidden: false,
                     expanded: false,
                     dragging: false,
+                    hide_token: 0,
                 }),
             });
             #[cfg(desktop)]
@@ -510,6 +549,7 @@ pub fn run() {
                 None,
             ))?;
             setup_tray(app)?;
+            show_panel_collapsed(app.handle(), false, false).map_err(|error| error.to_string())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -551,6 +591,7 @@ fn position_main_window(
     };
 
     window.set_shadow(false)?;
+    window.set_skip_taskbar(true)?;
     set_window_bounds_from_saved_or_bottom_right(&window, db)?;
     window.set_focusable(false)?;
     window.set_ignore_cursor_events(true)?;
@@ -574,6 +615,9 @@ fn show_panel_collapsed(
         return Ok(());
     };
 
+    window
+        .set_skip_taskbar(true)
+        .map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window
         .set_shadow(false)
@@ -608,6 +652,9 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
     };
 
     if should_show {
+        window
+            .set_skip_taskbar(true)
+            .map_err(|error| error.to_string())?;
         window.show().map_err(|error| error.to_string())?;
         window
             .set_shadow(false)
@@ -649,14 +696,24 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn refresh_tray_menu(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("main-tray") else {
+        return;
+    };
+    if let Ok(menu) = build_panel_menu(app) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
 fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let show = MenuItemBuilder::with_id("show_panel", "显示面板").build(app)?;
-    let pause = MenuItemBuilder::with_id("pause_panel", "暂时隐藏").build(app)?;
-    let hide_15 = MenuItemBuilder::with_id("hide_15", "隐藏 15 分钟").build(app)?;
-    let hide_30 = MenuItemBuilder::with_id("hide_30", "隐藏 30 分钟").build(app)?;
-    let hide_60 = MenuItemBuilder::with_id("hide_60", "隐藏 60 分钟").build(app)?;
-    let reposition = MenuItemBuilder::with_id("reposition_panel", "重新贴到右下角").build(app)?;
-    let quit = MenuItemBuilder::with_id("quit", "退出").build(app)?;
+    let labels = native_menu_labels(app);
+    let show = MenuItemBuilder::with_id("show_panel", labels.show_panel).build(app)?;
+    let pause = MenuItemBuilder::with_id("pause_panel", labels.pause_panel).build(app)?;
+    let hide_15 = MenuItemBuilder::with_id("hide_15", labels.hide_15).build(app)?;
+    let hide_30 = MenuItemBuilder::with_id("hide_30", labels.hide_30).build(app)?;
+    let hide_60 = MenuItemBuilder::with_id("hide_60", labels.hide_60).build(app)?;
+    let reposition = MenuItemBuilder::with_id("reposition_panel", labels.reposition).build(app)?;
+    let quit = MenuItemBuilder::with_id("quit", labels.quit).build(app)?;
     MenuBuilder::new(app)
         .item(&show)
         .item(&pause)
@@ -686,6 +743,7 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
         "pause_panel" => {
             let state = app.state::<AppState>();
             if let Ok(mut panel) = state.panel.lock() {
+                panel.hide_token = panel.hide_token.wrapping_add(1);
                 panel.manual_hidden = true;
                 panel.expanded = false;
             }
@@ -696,6 +754,49 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
         }
         "quit" => app.exit(0),
         _ => {}
+    }
+}
+
+fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
+    let language = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .db
+                .lock()
+                .ok()
+                .and_then(|db| get_app_setting_value(&db, "app_language").ok().flatten())
+        })
+        .unwrap_or_else(|| "zh".to_string());
+
+    match language.as_str() {
+        "ja" => NativeMenuLabels {
+            show_panel: "パネルを表示",
+            pause_panel: "一時的に隠す",
+            hide_15: "15分隠す",
+            hide_30: "30分隠す",
+            hide_60: "60分隠す",
+            reposition: "右下に戻す",
+            quit: "終了",
+        },
+        "en" => NativeMenuLabels {
+            show_panel: "Show panel",
+            pause_panel: "Hide temporarily",
+            hide_15: "Hide 15 min",
+            hide_30: "Hide 30 min",
+            hide_60: "Hide 60 min",
+            reposition: "Reset to lower-right",
+            quit: "Quit",
+        },
+        _ => NativeMenuLabels {
+            show_panel: "显示面板",
+            pause_panel: "暂时隐藏",
+            hide_15: "隐藏 15 分钟",
+            hide_30: "隐藏 30 分钟",
+            hide_60: "隐藏 60 分钟",
+            reposition: "重新贴到右下角",
+            quit: "退出",
+        },
     }
 }
 
@@ -776,6 +877,10 @@ fn foreground_window_is_fullscreen(app: &AppHandle) -> Result<bool, Box<dyn std:
         return Ok(false);
     }
 
+    if foreground_window_is_owned_by_explorer(foreground) {
+        return Ok(false);
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         if let Ok(app_hwnd) = window.hwnd() {
             if app_hwnd == foreground {
@@ -806,6 +911,44 @@ fn foreground_window_is_fullscreen(app: &AppHandle) -> Result<bool, Box<dyn std:
         && window_rect.top <= monitor_rect.top + TOLERANCE
         && window_rect.right >= monitor_rect.right - TOLERANCE
         && window_rect.bottom >= monitor_rect.bottom - TOLERANCE)
+}
+
+#[cfg(windows)]
+fn foreground_window_is_owned_by_explorer(hwnd: HWND) -> bool {
+    let mut process_id = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    }
+    if process_id == 0 {
+        return false;
+    }
+
+    let Ok(process) =
+        (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
+    else {
+        return false;
+    };
+
+    let mut buffer = [0u16; 260];
+    let mut size = buffer.len() as u32;
+    let result = unsafe {
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(buffer.as_mut_ptr()),
+            &mut size,
+        )
+    };
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
+
+    if result.is_err() || size == 0 {
+        return false;
+    }
+
+    let path = String::from_utf16_lossy(&buffer[..size as usize]);
+    path.rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
 }
 
 #[cfg(windows)]
@@ -1018,6 +1161,18 @@ fn set_app_setting_value(db: &Connection, key: &str, value: &str) -> rusqlite::R
     Ok(())
 }
 
+fn configure_database(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA busy_timeout = 5000;
+        PRAGMA foreign_keys = ON;
+        ",
+    )?;
+    Ok(())
+}
+
 fn initialize_database(db: &Connection) -> rusqlite::Result<()> {
     db.execute_batch(
         "
@@ -1091,23 +1246,31 @@ fn seed_initial_tasks(db: &Connection) -> rusqlite::Result<()> {
 
     let task_count: i64 = db.query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))?;
     if task_count == 0 {
-        for task in default_tasks() {
+        for task in seed_task_specs() {
+            let day_modifier = format!("+{} days", task.day_offset);
             db.execute(
                 "INSERT INTO tasks (
                     id, title, due_at, priority, status, notes, source, is_current, created_at, updated_at, completed_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 ) VALUES (
+                    ?1,
+                    ?2,
+                    date('now', 'localtime', ?3) || 'T' || ?4 || ':00',
+                    ?5,
+                    'active',
+                    ?6,
+                    'seed',
+                    0,
+                    strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'),
+                    strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'),
+                    NULL
+                 )",
                 params![
-                    &task.id,
-                    &task.title,
-                    &task.due_at,
-                    &task.priority,
-                    &task.status,
-                    &task.notes,
-                    &task.source,
-                    if task.is_current { 1 } else { 0 },
-                    &task.created_at,
-                    &task.updated_at,
-                    &task.completed_at
+                    task.id,
+                    task.title,
+                    day_modifier,
+                    task.due_time,
+                    task.priority,
+                    task.notes,
                 ],
             )?;
         }
@@ -1116,7 +1279,7 @@ fn seed_initial_tasks(db: &Connection) -> rusqlite::Result<()> {
     db.execute(
         "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-        params!["seed_tasks_v1", "done", "2026-06-21T09:00:00+09:00"],
+        params!["seed_tasks_v1", "done", chrono_like_now()],
     )?;
 
     Ok(())
@@ -1127,22 +1290,23 @@ fn migrate_seed_tasks_v2(db: &Connection) -> rusqlite::Result<()> {
         return Ok(());
     }
 
-    for task in default_tasks() {
+    for task in seed_task_specs() {
+        let day_modifier = format!("+{} days", task.day_offset);
         db.execute(
             "UPDATE tasks
              SET title = ?1,
-                 due_at = ?2,
-                 priority = ?3,
-                 notes = ?4,
-                 updated_at = ?5
+                 due_at = date('now', 'localtime', ?2) || 'T' || ?3 || ':00',
+                 priority = ?4,
+                 notes = ?5,
+                 updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime')
              WHERE id = ?6 AND source = 'seed'",
             params![
-                &task.title,
-                &task.due_at,
-                &task.priority,
-                &task.notes,
-                chrono_like_now(),
-                &task.id
+                task.title,
+                day_modifier,
+                task.due_time,
+                task.priority,
+                task.notes,
+                task.id
             ],
         )?;
     }
@@ -1151,6 +1315,36 @@ fn migrate_seed_tasks_v2(db: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+fn seed_task_specs() -> Vec<SeedTaskSpec> {
+    vec![
+        SeedTaskSpec {
+            id: "seed-graph-mining-quiz",
+            title: "示例：课程小测",
+            day_offset: 1,
+            due_time: "23:59",
+            priority: "high",
+            notes: "示例任务，可直接修改或删除",
+        },
+        SeedTaskSpec {
+            id: "seed-lab-report",
+            title: "示例：提交报告",
+            day_offset: 3,
+            due_time: "18:00",
+            priority: "medium",
+            notes: "示例任务，可直接修改或删除",
+        },
+        SeedTaskSpec {
+            id: "seed-paper-reading",
+            title: "示例：阅读材料",
+            day_offset: 7,
+            due_time: "23:59",
+            priority: "medium",
+            notes: "示例任务，可直接修改或删除",
+        },
+    ]
+}
+
+#[allow(dead_code)]
 fn default_tasks() -> Vec<DeadlineTask> {
     vec![
         DeadlineTask {
