@@ -345,6 +345,17 @@ button {
   font-size: 12px;
 }
 
+.task-note {
+  max-width: 100%;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--subtle);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inline-edit {
   width: 100%;
   border: 1px solid rgba(130, 184, 255, 0.42);
@@ -795,6 +806,11 @@ button.priority-pill {
   justify-content: space-between;
 }
 
+.settings-row--stack {
+  align-items: stretch;
+  flex-direction: column;
+}
+
 .settings-row > div:first-child {
   min-width: 0;
 }
@@ -807,6 +823,67 @@ button.priority-pill {
 
 .settings-actions .text-button {
   min-height: 29px;
+}
+
+.settings-menu-control {
+  position: relative;
+}
+
+.settings-submenu {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  min-width: 132px;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(24, 31, 42, 0.98);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  padding: 6px;
+}
+
+.settings-submenu button {
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.settings-submenu button:hover {
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.sync-form {
+  display: grid;
+  gap: 7px;
+}
+
+.sync-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 7px;
+}
+
+.settings-input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.055);
+  color: var(--text);
+  padding: 0 10px;
+  outline: none;
+  font-size: 12px;
+}
+
+.settings-input:focus {
+  border-color: rgba(126, 189, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(126, 189, 255, 0.11);
 }
 
 .data-path {

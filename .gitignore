@@ -4,6 +4,7 @@ dist-ssr/
 target/
 src-tauri/target/
 src-tauri/gen/
+.codex/
 .DS_Store
 *.local
 *.log
