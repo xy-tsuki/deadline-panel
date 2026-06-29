@@ -24,7 +24,8 @@ if (!signaturePath) {
   throw new Error(`Updater signature not found next to installer: ${setupPath}.sig`);
 }
 
-const assetName = encodeURIComponent(setupName);
+const releaseAssetName = setupName.replaceAll(" ", ".");
+const assetName = encodeURIComponent(releaseAssetName);
 const manifest = {
   version,
   notes: `Deadline Panel v${version}`,
