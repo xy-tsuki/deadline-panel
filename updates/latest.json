@@ -1,11 +1,11 @@
 {
   "version": "0.4.2",
   "notes": "Deadline Panel v0.4.2",
-  "pub_date": "2026-06-29T09:18:53.927Z",
+  "pub_date": "2026-06-29T09:35:30.122Z",
   "platforms": {
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTkYyWnJUTzlOTmgwcUFrU3NTTE5PSTBmZG1HQTVCVVRmK243UUJZSllFT1BkVkNwcmxpZVh5elpKMGRqL1p0S0E1V0VQUmFseiswNU54dTNjSjYrU0ZWb21PSEMrYVFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNzI0NzMzCWZpbGU6RGVhZGxpbmUgUGFuZWxfMC40LjJfeDY0LXNldHVwLmV4ZQpwTmYwMC9qYTBiaVdRMjlXZjRPS2g5dmY3eUtFV1diZHRLZTdVZEd2Y2NuY0xhQVhxUTR6Q1RRMHdzdDFCUm0wc3gybUtjZUI5VEkwVVpSbWNUM2dCZz09Cg==",
-      "url": "https://github.com/xy-tsuki/deadline-panel/releases/download/v0.4.2/Deadline%20Panel_0.4.2_x64-setup.exe"
+      "url": "https://github.com/xy-tsuki/deadline-panel/releases/download/v0.4.2/Deadline.Panel_0.4.2_x64-setup.exe"
     }
   }
 }
