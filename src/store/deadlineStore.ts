@@ -4,8 +4,13 @@ import { getTodayFocus, sortDeadlineTasks } from "../domain/taskSorting";
 import { DeadlineTask, NewTaskInput } from "../domain/task";
 import { AppLanguage } from "../i18n";
 import { loadSetting, loadTasks, removeTask, replaceTasks, saveSetting, saveTask } from "../storage/storage";
+import { deleteTaskFromSupabase, pushTasksToSupabase, pushTaskToSupabase, syncTasksWithSupabase } from "../sync/supabaseSync";
 
 export type FocusLimit = 3 | 5 | 10;
+
+interface SyncOptions {
+  silent?: boolean;
+}
 
 interface DeadlineState {
   tasks: DeadlineTask[];
@@ -26,6 +31,7 @@ interface DeadlineState {
   postponeTask: (id: string, dueAt: string) => Promise<void>;
   toggleCurrentTask: (id: string) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  syncWithCloud: (options?: SyncOptions) => Promise<void>;
   runCommand: (input: string) => Promise<void>;
   clearCommandMessage: () => void;
 }
@@ -83,6 +89,7 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
 
     try {
       await saveTask(task);
+      void pushTaskToSupabase(task).catch(() => undefined);
       set((state) => ({ error: null, tasks: sortDeadlineTasks([...state.tasks, task]) }));
     } catch (error) {
       set({ error: getErrorMessage(error) });
@@ -95,6 +102,7 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
 
     try {
       await Promise.all(tasks.map((task) => saveTask(task)));
+      void pushTasksToSupabase(tasks).catch(() => undefined);
       set((state) => ({
         error: null,
         commandMessage: `已导入 ${tasks.length} 条 Deadline`,
@@ -114,6 +122,7 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
 
     try {
       await Promise.all(normalizedTasks.map((task) => saveTask(task)));
+      void pushTasksToSupabase(normalizedTasks).catch(() => undefined);
       set((state) => {
         const merged = new Map(state.tasks.map((task) => [task.id, task]));
         for (const task of normalizedTasks) {
@@ -142,6 +151,7 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
 
     try {
       await saveTask(updated);
+      void pushTaskToSupabase(updated).catch(() => undefined);
       set((state) => ({
         error: null,
         tasks: sortDeadlineTasks(state.tasks.map((task) => (task.id === id ? updated : task)))
@@ -190,9 +200,27 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
   async deleteTask(id) {
     try {
       await removeTask(id);
+      void deleteTaskFromSupabase(id).catch(() => undefined);
       set((state) => ({ error: null, tasks: state.tasks.filter((task) => task.id !== id) }));
     } catch (error) {
       set({ error: getErrorMessage(error) });
+    }
+  },
+
+  async syncWithCloud(options) {
+    const isSilent = options?.silent ?? false;
+    try {
+      const mergedTasks = sortDeadlineTasks(await syncTasksWithSupabase(get().tasks));
+      await replaceTasks(mergedTasks);
+      set({
+        error: null,
+        commandMessage: isSilent ? get().commandMessage : `已同步 ${mergedTasks.length} 条事项`,
+        tasks: mergedTasks
+      });
+    } catch (error) {
+      if (isSilent) return;
+      set({ error: getErrorMessage(error) });
+      throw error;
     }
   },
 

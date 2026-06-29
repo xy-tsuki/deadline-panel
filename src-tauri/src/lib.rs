@@ -23,8 +23,9 @@ use windows::Win32::{
     },
     UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON},
     UI::WindowsAndMessaging::{
-        GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindowRect, GetWindowThreadProcessId,
-        IsIconic, IsWindowVisible, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+        GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetWindowPos, GW_HWNDPREV,
+        SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
     },
 };
 
@@ -89,6 +90,7 @@ struct DeadlineTask {
 #[serde(rename_all = "camelCase")]
 struct PanelPointerState {
     in_trigger: bool,
+    in_window: bool,
     left_down: bool,
     right_down: bool,
     cursor_x: i32,
@@ -713,6 +715,7 @@ fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::W
     let hide_30 = MenuItemBuilder::with_id("hide_30", labels.hide_30).build(app)?;
     let hide_60 = MenuItemBuilder::with_id("hide_60", labels.hide_60).build(app)?;
     let reposition = MenuItemBuilder::with_id("reposition_panel", labels.reposition).build(app)?;
+    let restart = MenuItemBuilder::with_id("restart", native_restart_label(app)).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", labels.quit).build(app)?;
     MenuBuilder::new(app)
         .item(&show)
@@ -722,6 +725,7 @@ fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::W
         .item(&hide_60)
         .item(&reposition)
         .separator()
+        .item(&restart)
         .item(&quit)
         .build()
 }
@@ -752,8 +756,17 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
         "reposition_panel" => {
             let _ = reset_panel_position(app.clone());
         }
+        "restart" => restart_app(app),
         "quit" => app.exit(0),
         _ => {}
+    }
+}
+
+fn restart_app(app: &AppHandle) {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if Command::new(exe_path).spawn().is_ok() {
+            app.exit(0);
+        }
     }
 }
 
@@ -797,6 +810,25 @@ fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
             reposition: "重新贴到右下角",
             quit: "退出",
         },
+    }
+}
+
+fn native_restart_label(app: &AppHandle) -> &'static str {
+    let language = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .db
+                .lock()
+                .ok()
+                .and_then(|db| get_app_setting_value(&db, "app_language").ok().flatten())
+        })
+        .unwrap_or_else(|| "zh".to_string());
+
+    match language.as_str() {
+        "ja" => "再起動",
+        "en" => "Restart",
+        _ => "重启",
     }
 }
 
@@ -881,6 +913,10 @@ fn foreground_window_is_fullscreen(app: &AppHandle) -> Result<bool, Box<dyn std:
         return Ok(false);
     }
 
+    if window_is_desktop_assistant(foreground) {
+        return Ok(false);
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         if let Ok(app_hwnd) = window.hwnd() {
             if app_hwnd == foreground {
@@ -915,18 +951,23 @@ fn foreground_window_is_fullscreen(app: &AppHandle) -> Result<bool, Box<dyn std:
 
 #[cfg(windows)]
 fn foreground_window_is_owned_by_explorer(hwnd: HWND) -> bool {
+    window_process_name(hwnd).is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
+}
+
+#[cfg(windows)]
+fn window_process_name(hwnd: HWND) -> Option<String> {
     let mut process_id = 0u32;
     unsafe {
         GetWindowThreadProcessId(hwnd, Some(&mut process_id));
     }
     if process_id == 0 {
-        return false;
+        return None;
     }
 
     let Ok(process) =
         (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) })
     else {
-        return false;
+        return None;
     };
 
     let mut buffer = [0u16; 260];
@@ -942,28 +983,149 @@ fn foreground_window_is_owned_by_explorer(hwnd: HWND) -> bool {
     let _ = unsafe { windows::Win32::Foundation::CloseHandle(process) };
 
     if result.is_err() || size == 0 {
-        return false;
+        return None;
     }
 
     let path = String::from_utf16_lossy(&buffer[..size as usize]);
-    path.rsplit(['\\', '/'])
-        .next()
-        .is_some_and(|name| name.eq_ignore_ascii_case("explorer.exe"))
+    path.rsplit(['\\', '/']).next().map(ToOwned::to_owned)
 }
 
 #[cfg(windows)]
 fn is_windows_shell_window(hwnd: HWND) -> bool {
-    let mut buffer = [0u16; 256];
-    let length = unsafe { GetClassNameW(hwnd, &mut buffer) };
-    if length <= 0 {
+    let Some(class_name) = window_class_name(hwnd) else {
         return false;
-    }
-
-    let class_name = String::from_utf16_lossy(&buffer[..length as usize]);
+    };
     matches!(
         class_name.as_str(),
         "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Button"
     )
+}
+
+#[cfg(windows)]
+fn window_class_name(hwnd: HWND) -> Option<String> {
+    let mut buffer = [0u16; 256];
+    let length = unsafe { GetClassNameW(hwnd, &mut buffer) };
+    if length <= 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..length as usize]))
+}
+
+#[cfg(windows)]
+fn window_belongs_to_current_process(hwnd: HWND) -> bool {
+    let mut process_id = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+    }
+    process_id != 0 && process_id == std::process::id()
+}
+
+#[cfg(windows)]
+fn cursor_is_occluded_above_panel(panel_hwnd: HWND, cursor: POINT) -> bool {
+    let mut hwnd = panel_hwnd;
+
+    for _ in 0..128 {
+        let Ok(previous) = (unsafe { GetWindow(hwnd, GW_HWNDPREV) }) else {
+            return false;
+        };
+        hwnd = previous;
+
+        if hwnd.0.is_null() || window_belongs_to_current_process(hwnd) {
+            continue;
+        }
+        if should_ignore_window_occluder(hwnd) {
+            continue;
+        }
+        if unsafe { !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
+            continue;
+        }
+
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() {
+            continue;
+        }
+        if point_in_rect(cursor, rect) {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn should_ignore_window_occluder(hwnd: HWND) -> bool {
+    is_windows_shell_window(hwnd)
+        || window_is_desktop_assistant(hwnd)
+        || (foreground_window_is_owned_by_explorer(hwnd) && !is_shell_overlay_window(hwnd))
+}
+
+#[cfg(windows)]
+fn foreground_shell_overlay_covers_cursor(cursor: POINT) -> bool {
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.0.is_null() || window_belongs_to_current_process(hwnd) {
+        return false;
+    }
+    if unsafe { !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
+        return false;
+    }
+
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rect) }.is_err() || !point_in_rect(cursor, rect) {
+        return false;
+    }
+
+    is_shell_overlay_window(hwnd)
+}
+
+#[cfg(windows)]
+fn is_shell_overlay_window(hwnd: HWND) -> bool {
+    if is_windows_shell_window(hwnd) {
+        return false;
+    }
+
+    let class_name = window_class_name(hwnd)
+        .map(|name| name.to_ascii_lowercase())
+        .unwrap_or_default();
+    let process_name = window_process_name(hwnd)
+        .map(|name| name.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    matches!(
+        process_name.as_str(),
+        "shellexperiencehost.exe"
+            | "startmenuexperiencehost.exe"
+            | "searchhost.exe"
+            | "textinputhost.exe"
+    ) || (process_name == "explorer.exe"
+        && (class_name.contains("notify")
+            || class_name.contains("overflow")
+            || class_name.contains("tray")
+            || class_name.contains("xaml")
+            || class_name.contains("corewindow")
+            || class_name.contains("composition")
+            || class_name.contains("flyout")
+            || class_name.contains("popup")
+            || class_name.contains("notification")
+            || class_name.contains("clock")))
+}
+
+#[cfg(windows)]
+fn window_is_desktop_assistant(hwnd: HWND) -> bool {
+    window_process_name(hwnd).is_some_and(|name| {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "360desktoplite.exe"
+                | "360desktoplite64.exe"
+                | "360desktopservice.exe"
+                | "360desktopservice64.exe"
+        )
+    })
+}
+
+#[cfg(windows)]
+fn point_in_rect(point: POINT, rect: RECT) -> bool {
+    point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
 }
 
 #[cfg(not(windows))]
@@ -1004,6 +1166,7 @@ fn get_panel_pointer_state(
     let Some(window) = app.get_webview_window("main") else {
         return Ok(PanelPointerState {
             in_trigger: false,
+            in_window: false,
             left_down: false,
             right_down: false,
             cursor_x: 0,
@@ -1013,6 +1176,7 @@ fn get_panel_pointer_state(
         });
     };
 
+    let panel_hwnd = window.hwnd()?;
     let position = window.outer_position()?;
     let size = window.outer_size()?;
     let scale = window.scale_factor()?;
@@ -1023,13 +1187,21 @@ fn get_panel_pointer_state(
     let left = position.x;
     let right = position.x + size.width as i32;
     let bottom = position.y + size.height as i32;
+    let window_top = position.y;
     let top = bottom - trigger_height;
-    let in_trigger = cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= bottom;
+    let in_window =
+        cursor.x >= left && cursor.x <= right && cursor.y >= window_top && cursor.y <= bottom;
+    let raw_in_trigger =
+        cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= bottom;
+    let in_trigger = raw_in_trigger
+        && !cursor_is_occluded_above_panel(panel_hwnd, cursor)
+        && !foreground_shell_overlay_covers_cursor(cursor);
     let left_down = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0;
     let right_down = unsafe { GetAsyncKeyState(VK_RBUTTON.0 as i32) } < 0;
 
     Ok(PanelPointerState {
         in_trigger,
+        in_window,
         left_down,
         right_down,
         cursor_x: cursor.x,
@@ -1045,6 +1217,7 @@ fn get_panel_pointer_state(
 ) -> Result<PanelPointerState, Box<dyn std::error::Error>> {
     Ok(PanelPointerState {
         in_trigger: false,
+        in_window: false,
         left_down: false,
         right_down: false,
         cursor_x: 0,

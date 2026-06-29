@@ -3,6 +3,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 export interface PanelPointerState {
   inTrigger: boolean;
+  inWindow: boolean;
   leftDown: boolean;
   rightDown: boolean;
   cursorX: number;

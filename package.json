@@ -1,6 +1,6 @@
 {
   "name": "deadline-panel",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "tauri:build": "tauri build && node scripts/patch-nsis-update-mode.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
     "lucide-react": "^0.468.0",

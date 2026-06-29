@@ -2,12 +2,14 @@ import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo,
 import {
   Check,
   ChevronRight,
+  Cloud,
   Clock3,
   Copy,
   Database,
   EyeOff,
   FolderOpen,
   History,
+  KeyRound,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -42,6 +44,12 @@ import {
   showPanelContextMenu,
   startPanelDrag
 } from "./runtime/tauri";
+import {
+  generateSyncCode,
+  hasDefaultSupabaseConfig,
+  loadSupabaseSyncSettings,
+  saveSupabaseSyncSettings
+} from "./sync/supabaseSync";
 import { APP_VERSION } from "./version";
 
 const priorityOptions: TaskPriority[] = ["urgent", "high", "medium", "low"];
@@ -53,6 +61,9 @@ const TRIGGER_ACTIVE_CHECK_INTERVAL_MS = 16;
 const TRIGGER_IDLE_CHECK_INTERVAL_MS = 140;
 const COLLAPSED_HOVER_DWELL_MS = 180;
 const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/releases/latest";
+const CLOUD_SYNC_START_DELAY_MS = 10_000;
+const CLOUD_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const CLOUD_SYNC_EXPAND_MIN_INTERVAL_MS = 60_000;
 
 interface ImportPreviewRow {
   id: string;
@@ -79,6 +90,8 @@ export function App() {
   const pointerButtonsRef = useRef({ leftDown: false, rightDown: false });
   const isDraggingPanelRef = useRef(false);
   const collapsedInputRef = useRef(false);
+  const cloudSyncInFlightRef = useRef(false);
+  const lastCloudSyncAtRef = useRef(0);
   const forceExpanded = new URLSearchParams(window.location.search).get("panel") === "expanded";
   const tasks = useDeadlineStore((state) => state.tasks);
   const focusLimit = useDeadlineStore((state) => state.focusLimit);
@@ -87,6 +100,7 @@ export function App() {
   const commandMessage = useDeadlineStore((state) => state.commandMessage);
   const clearCommandMessage = useDeadlineStore((state) => state.clearCommandMessage);
   const load = useDeadlineStore((state) => state.load);
+  const syncWithCloud = useDeadlineStore((state) => state.syncWithCloud);
 
   const focusTasks = useMemo(() => selectFocusTasks(tasks, focusLimit), [focusLimit, tasks]);
   const nearest = useMemo(() => getNearestDeadline(tasks), [tasks]);
@@ -95,6 +109,40 @@ export function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  async function runSilentCloudSync(minIntervalMs = 0) {
+    const now = Date.now();
+    if (isLoading || cloudSyncInFlightRef.current) return;
+    if (minIntervalMs > 0 && now - lastCloudSyncAtRef.current < minIntervalMs) return;
+
+    cloudSyncInFlightRef.current = true;
+    lastCloudSyncAtRef.current = now;
+    try {
+      await syncWithCloud({ silent: true });
+    } finally {
+      cloudSyncInFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    let isMounted = true;
+
+    async function runSilentSync() {
+      if (!isMounted) return;
+      await runSilentCloudSync();
+    }
+
+    const startupTimer = window.setTimeout(() => void runSilentSync(), CLOUD_SYNC_START_DELAY_MS);
+    const interval = window.setInterval(() => void runSilentSync(), CLOUD_SYNC_INTERVAL_MS);
+
+    return () => {
+      isMounted = false;
+      window.clearTimeout(startupTimer);
+      window.clearInterval(interval);
+    };
+  }, [isLoading, syncWithCloud]);
 
   useEffect(() => {
     if (forceExpanded) {
@@ -129,7 +177,9 @@ export function App() {
     async function syncFullscreenState() {
       try {
         const isFullscreen = await isForegroundWindowFullscreen();
-        if (!isMounted || isFullscreen === lastAutoHiddenRef.current) return;
+        if (!isMounted) return;
+
+        if (isFullscreen === lastAutoHiddenRef.current) return;
 
         lastAutoHiddenRef.current = isFullscreen;
         if (isFullscreen) {
@@ -244,11 +294,38 @@ export function App() {
     }
   }
 
+  function scheduleCollapseWhenPointerLeavesWindow(delayMs = COLLAPSE_DELAY_MS) {
+    clearCollapseTimer();
+    collapseTimerRef.current = window.setTimeout(() => {
+      collapseTimerRef.current = null;
+      void collapseIfPointerOutsideWindow();
+    }, delayMs);
+  }
+
+  async function collapseIfPointerOutsideWindow() {
+    if (forceExpanded) return;
+
+    if (isTauriRuntime()) {
+      try {
+        const state = await getPanelPointerState();
+        if (state?.inWindow) {
+          scheduleCollapseWhenPointerLeavesWindow(180);
+          return;
+        }
+      } catch {
+        // Fall through to normal collapse if native pointer state is unavailable.
+      }
+    }
+
+    collapsePanel();
+  }
+
   function expandPanel() {
     clearCollapseTimer();
     clearAnimationTimer();
     collapsedInputRef.current = false;
     setIsExpanded(true);
+    void runSilentCloudSync(CLOUD_SYNC_EXPAND_MIN_INTERVAL_MS);
     void setNativePanelExpanded(true);
   }
 
@@ -271,11 +348,7 @@ export function App() {
   function handlePointerLeave() {
     if (forceExpanded) return;
 
-    clearCollapseTimer();
-    collapseTimerRef.current = window.setTimeout(() => {
-      collapsePanel();
-      collapseTimerRef.current = null;
-    }, COLLAPSE_DELAY_MS);
+    scheduleCollapseWhenPointerLeavesWindow();
   }
 
   async function handleHideTemporarily() {
@@ -429,6 +502,7 @@ function ExpandedPanel({
 
       <TaskComposer />
       <HistoryPanel />
+      <CloudSyncPanel />
       <SettingsPanel />
       <ImportPanel />
     </div>
@@ -488,6 +562,7 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
   const [postponeMode, setPostponeMode] = useState<"closed" | "menu" | "custom">("closed");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const [customDue, setCustomDue] = useState(() => toDateTimeLocalValue(addDays(task.dueAt, 1)));
+  const compactNotes = task.notes.trim();
 
   useEffect(() => {
     setDraftTitle(task.title);
@@ -581,6 +656,11 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
             {formatDue(task.dueAt, language)}
           </button>
         )}
+        {compactNotes ? (
+          <p className="task-note" title={compactNotes}>
+            {compactNotes}
+          </p>
+        ) : null}
       </div>
       <div className="task-side">
         <span>{formatTimeLeft(task.dueAt, new Date(), language)}</span>
@@ -837,6 +917,177 @@ function HistoryPanel() {
   );
 }
 
+function CloudSyncPanel() {
+  const language = useDeadlineStore((state) => state.language);
+  const ui = getStrings(language);
+  const syncWithCloud = useDeadlineStore((state) => state.syncWithCloud);
+  const [isOpen, setIsOpen] = useState(false);
+  const [syncUrl, setSyncUrl] = useState("");
+  const [syncAnonKey, setSyncAnonKey] = useState("");
+  const [syncCode, setSyncCode] = useState("");
+  const [isSyncPending, setIsSyncPending] = useState(false);
+  const [showSyncAdvanced, setShowSyncAdvanced] = useState(() => !hasDefaultSupabaseConfig());
+  const [isConfirmingSyncCode, setIsConfirmingSyncCode] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    let isMounted = true;
+    void loadSupabaseSyncSettings()
+      .then((settings) => {
+        if (!isMounted) return;
+        setSyncUrl(settings.url);
+        setSyncAnonKey(settings.anonKey);
+        setSyncCode(settings.syncCode);
+      })
+      .catch(() => {
+        if (isMounted) setSyncCode("");
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!message) return;
+
+    const timer = window.setTimeout(() => setMessage(null), 3200);
+    return () => window.clearTimeout(timer);
+  }, [message]);
+
+  useEffect(() => {
+    if (!isConfirmingSyncCode) return;
+
+    const timer = window.setTimeout(() => setIsConfirmingSyncCode(false), 6000);
+    return () => window.clearTimeout(timer);
+  }, [isConfirmingSyncCode]);
+
+  async function handleSaveSyncConfig() {
+    setIsSyncPending(true);
+    setMessage(null);
+    try {
+      const code = syncCode.trim() || generateSyncCode();
+      setSyncCode(code);
+      await saveSupabaseSyncSettings({ url: syncUrl, anonKey: syncAnonKey, syncCode: code });
+      setMessage(ui.settings.syncConfigSaved);
+    } catch {
+      setMessage(ui.settings.syncConfigFailed);
+    } finally {
+      setIsSyncPending(false);
+    }
+  }
+
+  function handleGenerateSyncCode() {
+    if (!isConfirmingSyncCode) {
+      setIsConfirmingSyncCode(true);
+      setMessage(ui.settings.confirmGenerateSyncCode);
+      return;
+    }
+
+    setSyncCode(generateSyncCode());
+    setIsConfirmingSyncCode(false);
+    setMessage(ui.settings.syncCodeGenerated);
+  }
+
+  async function handleCopySyncCode() {
+    try {
+      const code = syncCode.trim();
+      if (!code) return;
+      await navigator.clipboard.writeText(code);
+      setMessage(ui.settings.syncCodeCopied);
+    } catch {
+      setMessage(ui.settings.syncCodeCopyFailed);
+    }
+  }
+
+  async function handleSyncNow() {
+    setIsSyncPending(true);
+    setMessage(ui.settings.syncingNow);
+    try {
+      const code = syncCode.trim() || generateSyncCode();
+      setSyncCode(code);
+      await saveSupabaseSyncSettings({ url: syncUrl, anonKey: syncAnonKey, syncCode: code });
+      await syncWithCloud();
+      setMessage(ui.settings.syncDone);
+    } catch {
+      setMessage(ui.settings.syncFailed);
+    } finally {
+      setIsSyncPending(false);
+    }
+  }
+
+  return (
+    <section className="panel-section panel-section--sync">
+      <button type="button" className="add-toggle" onClick={() => setIsOpen((value) => !value)}>
+        <Cloud aria-hidden="true" />
+        <span>{ui.settings.cloudSync}</span>
+      </button>
+
+      {isOpen ? (
+        <div className="settings-panel">
+          <div className="settings-row settings-row--stack">
+            <div>
+              <p className="setting-title">{ui.settings.cloudSync}</p>
+              <p className="setting-copy">{ui.settings.cloudSyncCopy}</p>
+            </div>
+            <div className="sync-form">
+              <div className="sync-code-row">
+                <input
+                  className="settings-input"
+                  value={syncCode}
+                  placeholder={ui.settings.syncCode}
+                  onChange={(event) => setSyncCode(event.target.value)}
+                />
+                <button type="button" className="icon-button" title={ui.settings.copySyncCode} disabled={!syncCode.trim()} onClick={() => void handleCopySyncCode()}>
+                  <Copy aria-hidden="true" />
+                </button>
+              </div>
+              {showSyncAdvanced ? (
+                <>
+                  <input
+                    className="settings-input"
+                    value={syncUrl}
+                    placeholder={ui.settings.supabaseUrl}
+                    onChange={(event) => setSyncUrl(event.target.value)}
+                  />
+                  <input
+                    className="settings-input"
+                    type="password"
+                    value={syncAnonKey}
+                    placeholder={ui.settings.supabaseAnonKey}
+                    onChange={(event) => setSyncAnonKey(event.target.value)}
+                  />
+                </>
+              ) : null}
+              <div className="settings-actions">
+                <button type="button" className="text-button" disabled={isSyncPending} onClick={() => void handleSaveSyncConfig()}>
+                  <Cloud aria-hidden="true" />
+                  {ui.settings.saveSyncConfig}
+                </button>
+                <button type="button" className="text-button" disabled={isSyncPending} onClick={handleGenerateSyncCode}>
+                  <RefreshCw aria-hidden="true" />
+                  {isConfirmingSyncCode ? ui.settings.confirmGenerateSyncCodeButton : ui.settings.generateSyncCode}
+                </button>
+                <button type="button" className="text-button" onClick={() => setShowSyncAdvanced((value) => !value)}>
+                  <KeyRound aria-hidden="true" />
+                  {showSyncAdvanced ? ui.settings.hideSyncAdvanced : ui.settings.showSyncAdvanced}
+                </button>
+                <button type="button" className="text-button" disabled={isSyncPending} onClick={() => void handleSyncNow()}>
+                  <RefreshCw aria-hidden="true" />
+                  {ui.settings.syncNow}
+                </button>
+              </div>
+              {message ? <p className="setting-message">{message}</p> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function SettingsPanel() {
   const language = useDeadlineStore((state) => state.language);
   const setLanguage = useDeadlineStore((state) => state.setLanguage);
@@ -848,6 +1099,7 @@ function SettingsPanel() {
   const [isAutostartEnabled, setIsAutostartEnabled] = useState(false);
   const [isAutostartPending, setIsAutostartPending] = useState(false);
   const [isUpdatePending, setIsUpdatePending] = useState(false);
+  const [hideMenuOpen, setHideMenuOpen] = useState(false);
   const [dataPath, setDataPath] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -928,6 +1180,7 @@ function SettingsPanel() {
   }
 
   async function handleHideFor(minutes: number) {
+    setHideMenuOpen(false);
     try {
       await hidePanelForMinutes(minutes);
     } catch {
@@ -1043,18 +1296,25 @@ function SettingsPanel() {
               <RotateCcw aria-hidden="true" />
               {ui.settings.resetPosition}
             </button>
-            <button type="button" className="text-button" onClick={() => void handleHideFor(15)}>
-              <EyeOff aria-hidden="true" />
-              {ui.settings.hide15}
-            </button>
-            <button type="button" className="text-button" onClick={() => void handleHideFor(30)}>
-              <EyeOff aria-hidden="true" />
-              {ui.settings.hide30}
-            </button>
-            <button type="button" className="text-button" onClick={() => void handleHideFor(60)}>
-              <EyeOff aria-hidden="true" />
-              {ui.settings.hide60}
-            </button>
+            <div className="settings-menu-control">
+              <button type="button" className="text-button" onClick={() => setHideMenuOpen((value) => !value)}>
+                <EyeOff aria-hidden="true" />
+                {ui.settings.hideTemporary}
+              </button>
+              {hideMenuOpen ? (
+                <div className="settings-submenu">
+                  <button type="button" onClick={() => void handleHideFor(15)}>
+                    {ui.settings.hide15}
+                  </button>
+                  <button type="button" onClick={() => void handleHideFor(30)}>
+                    {ui.settings.hide30}
+                  </button>
+                  <button type="button" onClick={() => void handleHideFor(60)}>
+                    {ui.settings.hide60}
+                  </button>
+                </div>
+              ) : null}
+            </div>
             <button type="button" className="text-button" onClick={handleOpenDataDir}>
               <FolderOpen aria-hidden="true" />
               {ui.settings.dataDir}
