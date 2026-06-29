@@ -135,7 +135,7 @@ npm run tauri:dev
 ## 构建 Windows 安装包
 
 ```powershell
-npm run tauri:build -- --bundles nsis
+npm run tauri:build
 ```
 
 生成的安装包位于：
@@ -143,6 +143,16 @@ npm run tauri:build -- --bundles nsis
 ```text
 src-tauri/target/release/bundle/nsis/
 ```
+
+0.4.2 起，构建脚本会同时生成应用内自动更新需要的 `updates/latest.json`。发布 GitHub Release 时只需要上传安装包：
+
+```text
+Deadline Panel_<version>_x64-setup.exe
+```
+
+`.sig` 是构建时生成的签名中间产物；`updates/latest.json` 已经内嵌签名内容，所以不需要单独上传 `.sig`。发布新版本时，应先上传安装包，再提交并推送更新后的 `updates/latest.json`。
+
+自动更新签名私钥默认放在 `src-tauri/updater.key`，该文件不会提交到 Git。丢失私钥后，旧版本将无法验证后续更新包。
 
 ## 数据存储
 

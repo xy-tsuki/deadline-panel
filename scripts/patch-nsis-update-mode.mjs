@@ -72,4 +72,26 @@ execFileSync(makensisPath, ["installer.nsi"], {
 });
 
 copyFileSync(outputPath, setupPath);
+const privateKeyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH
+  ?? path.join(rootDir, "src-tauri", "updater.key");
+if (existsSync(privateKeyPath)) {
+  const tauriCliPath = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "tauri.js");
+  const signerEnv = { ...process.env };
+  delete signerEnv.TAURI_SIGNING_PRIVATE_KEY;
+  execFileSync(
+    process.execPath,
+    [
+      tauriCliPath,
+      "signer",
+      "sign",
+      "--private-key-path",
+      privateKeyPath,
+      `--password=${process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? ""}`,
+      setupPath
+    ],
+    { env: signerEnv, stdio: "inherit" }
+  );
+} else {
+  console.warn(`Updater signing key not found, skipped final installer signing: ${privateKeyPath}`);
+}
 console.log(`Patched update-mode installer: ${setupPath}`);
