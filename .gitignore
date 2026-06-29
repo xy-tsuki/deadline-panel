@@ -4,6 +4,7 @@ dist-ssr/
 target/
 src-tauri/target/
 src-tauri/gen/
+src-tauri/updater.key
 .codex/
 .DS_Store
 *.local

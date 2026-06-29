@@ -1,4 +1,6 @@
 import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Check,
   ChevronRight,
@@ -25,7 +27,7 @@ import { formatDue, formatTimeLeft, fromDateTimeLocalValue, toDateTimeLocalValue
 import { getCurrentTasks, getNearestDeadline, sortDeadlineTasks } from "./domain/taskSorting";
 import { DeadlineTask, NewTaskInput, TaskPriority, priorityLabel } from "./domain/task";
 import { FocusLimit, selectFocusTasks, useDeadlineStore } from "./store/deadlineStore";
-import { getImportPrompt, getStrings, languageName, languageOptions } from "./i18n";
+import { getImportPrompt, getStrings, languageName, languageOptions, resolveLanguage } from "./i18n";
 import {
   getAutostartEnabled,
   backupDatabase,
@@ -64,6 +66,31 @@ const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/r
 const CLOUD_SYNC_START_DELAY_MS = 10_000;
 const CLOUD_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const CLOUD_SYNC_EXPAND_MIN_INTERVAL_MS = 60_000;
+const UPDATE_DOWNLOAD_TIMEOUT_MS = 180_000;
+
+const updaterStatusText = {
+  zh: {
+    available: "发现新版本 {version}，正在准备下载",
+    downloading: "正在下载更新...",
+    downloadingProgress: "正在下载更新 {progress}%",
+    installing: "正在安装更新...",
+    restarting: "更新已安装，正在重启..."
+  },
+  ja: {
+    available: "新しいバージョン {version} を見つけました。ダウンロードを準備しています",
+    downloading: "更新をダウンロードしています...",
+    downloadingProgress: "更新をダウンロードしています {progress}%",
+    installing: "更新をインストールしています...",
+    restarting: "更新をインストールしました。再起動しています..."
+  },
+  en: {
+    available: "Version {version} is available. Preparing download",
+    downloading: "Downloading update...",
+    downloadingProgress: "Downloading update {progress}%",
+    installing: "Installing update...",
+    restarting: "Update installed. Restarting..."
+  }
+} as const;
 
 interface ImportPreviewRow {
   id: string;
@@ -1192,6 +1219,42 @@ function SettingsPanel() {
     setIsUpdatePending(true);
     setMessage(ui.settings.checkingUpdates);
     try {
+      if (isTauriRuntime()) {
+        const updaterText = updaterStatusText[resolveLanguage(language)];
+        const update = await check();
+        if (!update) {
+          setMessage(formatTemplate(ui.settings.upToDate, { version: APP_VERSION }));
+          return;
+        }
+
+        let downloadedBytes = 0;
+        let totalBytes = 0;
+        setMessage(formatTemplate(updaterText.available, { version: normalizeVersion(update.version) }));
+        await update.downloadAndInstall((event: DownloadEvent) => {
+          if (event.event === "Started") {
+            downloadedBytes = 0;
+            totalBytes = event.data.contentLength ?? 0;
+            setMessage(updaterText.downloading);
+            return;
+          }
+          if (event.event === "Progress") {
+            downloadedBytes += event.data.chunkLength;
+            if (totalBytes > 0) {
+              const progress = Math.min(99, Math.round((downloadedBytes / totalBytes) * 100));
+              setMessage(formatTemplate(updaterText.downloadingProgress, { progress: String(progress) }));
+            } else {
+              setMessage(updaterText.downloading);
+            }
+            return;
+          }
+          setMessage(updaterText.installing);
+        }, { timeout: UPDATE_DOWNLOAD_TIMEOUT_MS });
+
+        setMessage(updaterText.restarting);
+        await relaunch();
+        return;
+      }
+
       const response = await fetch(RELEASES_API_URL, {
         headers: {
           Accept: "application/vnd.github+json"

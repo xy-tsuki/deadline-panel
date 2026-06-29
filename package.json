@@ -1,6 +1,6 @@
 {
   "name": "deadline-panel",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,12 +8,15 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build && node scripts/patch-nsis-update-mode.mjs"
+    "tauri:build": "node scripts/build-release.mjs",
+    "updater:json": "node scripts/make-latest-json.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-autostart": "^2.5.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

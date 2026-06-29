@@ -522,6 +522,8 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             let _ = show_panel_collapsed(app, true, false);
         }));
+        builder = builder.plugin(tauri_plugin_process::init());
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
     builder
