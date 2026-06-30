@@ -62,31 +62,24 @@ button {
 
 .desktop-stage {
   position: relative;
-  min-height: 100vh;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }
 
-.deadline-widget {
-  position: fixed;
-  right: 0;
-  bottom: 0;
+.strip-window,
+.panel-window {
   width: min(372px, 100vw);
-  display: flex;
-  flex-direction: column-reverse;
-  gap: 10px;
-  align-items: stretch;
   pointer-events: auto;
 }
 
-.deadline-widget--open-down {
-  top: 0;
-  bottom: auto;
-  flex-direction: column;
+.strip-window {
+  height: 44px;
 }
 
-.expanded-panel {
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
+.panel-window {
+  height: 100vh;
+  overflow: hidden;
 }
 
 .collapsed-strip {
@@ -100,6 +93,7 @@ button {
   border-radius: 8px;
   background: #171b22;
   color: var(--muted);
+  cursor: default;
   font-size: 13px;
   line-height: 1.35;
 }
@@ -117,25 +111,17 @@ button {
 }
 
 .expanded-panel {
-  max-height: min(86vh, 642px);
+  max-height: 100vh;
   overflow: hidden auto;
+  border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel-strong);
-  opacity: 0;
-  transform: translateX(24px) translateY(8px);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity 160ms ease,
-    transform 180ms ease,
-    visibility 180ms ease;
-}
-
-.deadline-widget--expanded .expanded-panel {
   opacity: 1;
   transform: translateX(0) translateY(0);
   visibility: visible;
   pointer-events: auto;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
 }
 
 .panel-section {
@@ -149,7 +135,6 @@ button {
 
 .panel-section--focus {
   padding: 17px 15px 16px;
-  cursor: move;
 }
 
 .panel-section--focus button {
@@ -1035,7 +1020,8 @@ button.priority-pill {
     min-width: 320px;
   }
 
-  .deadline-widget {
+  .strip-window,
+  .panel-window {
     width: 100vw;
   }
 

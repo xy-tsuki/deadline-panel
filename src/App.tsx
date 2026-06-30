@@ -32,7 +32,6 @@ import {
   getAutostartEnabled,
   backupDatabase,
   getDataFilePath,
-  getPanelExpandDirection,
   getPanelPointerState,
   hidePanelTemporarily,
   hidePanelForMinutes,
@@ -41,7 +40,6 @@ import {
   openDataDir,
   resetPanelPosition,
   setAutostartEnabled,
-  setPanelAcceptsInput,
   setPanelAutoHidden,
   setPanelExpanded as setNativePanelExpanded,
   showPanelContextMenu,
@@ -60,8 +58,6 @@ const focusLimitOptions: FocusLimit[] = [3, 5, 10];
 const COLLAPSE_DELAY_MS = 220;
 const COLLAPSE_ANIMATION_MS = 210;
 const FULLSCREEN_CHECK_INTERVAL_MS = 1200;
-const TRIGGER_ACTIVE_CHECK_INTERVAL_MS = 16;
-const TRIGGER_IDLE_CHECK_INTERVAL_MS = 140;
 const COLLAPSED_HOVER_DWELL_MS = 180;
 const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/releases/latest";
 const CLOUD_SYNC_START_DELAY_MS = 10_000;
@@ -114,14 +110,13 @@ export function App() {
   const [expandDirection, setExpandDirection] = useState<"up" | "down">("up");
   const collapseTimerRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
+  const collapsedHoverTimerRef = useRef<number | null>(null);
   const lastAutoHiddenRef = useRef(false);
-  const hoverStartRef = useRef<number | null>(null);
-  const pointerButtonsRef = useRef({ leftDown: false, rightDown: false });
   const isDraggingPanelRef = useRef(false);
-  const collapsedInputRef = useRef(false);
   const cloudSyncInFlightRef = useRef(false);
   const lastCloudSyncAtRef = useRef(0);
-  const forceExpanded = new URLSearchParams(window.location.search).get("panel") === "expanded";
+  const windowRole = new URLSearchParams(window.location.search).get("window") === "panel" ? "panel" : "strip";
+  const isPanelWindow = windowRole === "panel";
   const tasks = useDeadlineStore((state) => state.tasks);
   const focusLimit = useDeadlineStore((state) => state.focusLimit);
   const isLoading = useDeadlineStore((state) => state.isLoading);
@@ -174,12 +169,6 @@ export function App() {
   }, [isLoading, syncWithCloud]);
 
   useEffect(() => {
-    if (forceExpanded) {
-      void expandPanel();
-    }
-  }, [forceExpanded]);
-
-  useEffect(() => {
     if (!commandMessage) return;
 
     const timer = window.setTimeout(() => {
@@ -196,11 +185,15 @@ export function App() {
       if (animationTimerRef.current !== null) {
         window.clearTimeout(animationTimerRef.current);
       }
+      if (collapsedHoverTimerRef.current !== null) {
+        window.clearTimeout(collapsedHoverTimerRef.current);
+      }
     };
   }, []);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    if (isPanelWindow) return;
 
     let isMounted = true;
     async function syncFullscreenState() {
@@ -227,95 +220,26 @@ export function App() {
       isMounted = false;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [isPanelWindow]);
 
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (!isTauriRuntime() || isPanelWindow) return;
 
-    let isMounted = true;
-    let timer: number | null = null;
-
-    async function pollPointerState() {
-      let nextInterval = TRIGGER_IDLE_CHECK_INTERVAL_MS;
-
-      if (!isMounted) return;
-      if (lastAutoHiddenRef.current || ((isExpanded || forceExpanded) && !isDraggingPanelRef.current)) {
-        timer = window.setTimeout(() => void pollPointerState(), nextInterval);
-        return;
-      }
-
-      try {
-        const state = await getPanelPointerState();
-        if (!isMounted || !state) return;
-
-        const previousButtons = pointerButtonsRef.current;
-        if (!isExpanded && !forceExpanded) {
-          setExpandDirection(state.expandDirection);
-        }
-        const shouldAcceptCollapsedInput = !isExpanded && !forceExpanded && state.inTrigger;
-        if (collapsedInputRef.current !== shouldAcceptCollapsedInput) {
-          collapsedInputRef.current = shouldAcceptCollapsedInput;
-          void setPanelAcceptsInput(shouldAcceptCollapsedInput);
-        }
-
-        if (state.inTrigger && state.rightDown && !previousButtons.rightDown) {
-          hoverStartRef.current = null;
-          void showPanelContextMenu();
-        }
-
-        if (state.inTrigger && state.leftDown && !previousButtons.leftDown) {
-          hoverStartRef.current = null;
-          isDraggingPanelRef.current = true;
-          void startPanelDrag();
-        }
-
-        if (!state.leftDown && previousButtons.leftDown && isDraggingPanelRef.current) {
-          isDraggingPanelRef.current = false;
-        }
-
-        const isBusyWithButtons = state.leftDown || state.rightDown || isDraggingPanelRef.current;
-        if (!isExpanded && !forceExpanded && state.inTrigger && !isBusyWithButtons) {
-          hoverStartRef.current ??= Date.now();
-          nextInterval = TRIGGER_ACTIVE_CHECK_INTERVAL_MS;
-          if (Date.now() - hoverStartRef.current >= COLLAPSED_HOVER_DWELL_MS) {
-            void expandPanel();
-            hoverStartRef.current = null;
-          }
-        } else if (!state.inTrigger) {
-          hoverStartRef.current = null;
-        }
-
-        if (state.inTrigger || isBusyWithButtons) {
-          nextInterval = TRIGGER_ACTIVE_CHECK_INTERVAL_MS;
-        }
-
-        pointerButtonsRef.current = {
-          leftDown: state.leftDown,
-          rightDown: state.rightDown
-        };
-      } catch {
-        // Cursor polling is a Windows overlay nicety; ignore transient failures.
-      }
-
-      if (isMounted) {
-        timer = window.setTimeout(() => void pollPointerState(), nextInterval);
-      }
-    }
-
-    timer = window.setTimeout(() => void pollPointerState(), 0);
-
-    return () => {
-      isMounted = false;
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [forceExpanded, isExpanded]);
+    const interval = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(interval);
+  }, [isPanelWindow, load]);
 
   function clearAnimationTimer() {
     if (animationTimerRef.current !== null) {
       window.clearTimeout(animationTimerRef.current);
       animationTimerRef.current = null;
+    }
+  }
+
+  function clearCollapsedHoverTimer() {
+    if (collapsedHoverTimerRef.current !== null) {
+      window.clearTimeout(collapsedHoverTimerRef.current);
+      collapsedHoverTimerRef.current = null;
     }
   }
 
@@ -335,8 +259,6 @@ export function App() {
   }
 
   async function collapseIfPointerOutsideWindow() {
-    if (forceExpanded) return;
-
     if (isTauriRuntime()) {
       try {
         const state = await getPanelPointerState();
@@ -355,12 +277,8 @@ export function App() {
   async function expandPanel() {
     clearCollapseTimer();
     clearAnimationTimer();
-    collapsedInputRef.current = false;
+    clearCollapsedHoverTimer();
     void runSilentCloudSync(CLOUD_SYNC_EXPAND_MIN_INTERVAL_MS);
-
-    const preview = await getPanelExpandDirection();
-    setExpandDirection(preview.direction);
-    await nextAnimationFrame();
 
     const result = await setNativePanelExpanded(true);
     setExpandDirection(result.direction);
@@ -370,31 +288,65 @@ export function App() {
   function collapsePanel() {
     clearAnimationTimer();
     setIsExpanded(false);
-    animationTimerRef.current = window.setTimeout(() => {
-      collapsedInputRef.current = false;
-      void (async () => {
-        const result = await setNativePanelExpanded(false);
-        setExpandDirection(result.direction);
-        animationTimerRef.current = null;
-      })();
-    }, COLLAPSE_ANIMATION_MS);
+    void (async () => {
+      const result = await setNativePanelExpanded(false);
+      setExpandDirection(result.direction);
+      animationTimerRef.current = null;
+    })();
   }
 
-  function handlePointerEnter() {
+  async function handleStripPointerEnter() {
+    clearCollapseTimer();
+    if (isExpanded || lastAutoHiddenRef.current || isDraggingPanelRef.current) return;
+
     if (!isTauriRuntime()) {
       void expandPanel();
+      return;
     }
+
+    clearCollapsedHoverTimer();
+    try {
+      const state = await getPanelPointerState();
+      if (!state?.inTrigger) return;
+    } catch {
+      return;
+    }
+
+    collapsedHoverTimerRef.current = window.setTimeout(() => {
+      collapsedHoverTimerRef.current = null;
+      if (!isExpanded && !lastAutoHiddenRef.current && !isDraggingPanelRef.current) {
+        void (async () => {
+          try {
+            const state = await getPanelPointerState();
+            if (!state?.inTrigger) return;
+          } catch {
+            return;
+          }
+          void expandPanel();
+        })();
+      }
+    }, COLLAPSED_HOVER_DWELL_MS);
   }
 
-  function handlePointerLeave() {
-    if (forceExpanded) return;
+  function handleStripPointerLeave() {
+    clearCollapsedHoverTimer();
+    if (!isExpanded) return;
 
+    scheduleCollapseWhenPointerLeavesWindow();
+  }
+
+  function handlePanelPointerEnter() {
+    clearCollapseTimer();
+  }
+
+  function handlePanelPointerLeave() {
     scheduleCollapseWhenPointerLeavesWindow();
   }
 
   async function handleHideTemporarily() {
     clearCollapseTimer();
     clearAnimationTimer();
+    clearCollapsedHoverTimer();
     setIsExpanded(false);
     const result = await setNativePanelExpanded(false);
     setExpandDirection(result.direction);
@@ -405,29 +357,66 @@ export function App() {
     if (isTextEditingTarget(event.target)) return;
 
     event.preventDefault();
+    clearCollapsedHoverTimer();
     void showPanelContextMenu();
   }
 
-  function handleExpandedDragStart(event: PointerEvent<HTMLElement>) {
-    if (event.button !== 0 || isInteractiveTarget(event.target) || isScrollbarPointer(event)) return;
+  async function handleCollapsedDragStart(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || isPanelWindow || isInteractiveTarget(event.target)) return;
 
     event.preventDefault();
-    hoverStartRef.current = null;
+    clearCollapseTimer();
+    clearAnimationTimer();
+    clearCollapsedHoverTimer();
     isDraggingPanelRef.current = true;
-    pointerButtonsRef.current = { ...pointerButtonsRef.current, leftDown: true };
-    void startPanelDrag();
+    const markDragDone = () => {
+      isDraggingPanelRef.current = false;
+      window.removeEventListener("pointerup", markDragDone);
+      window.removeEventListener("mouseup", markDragDone);
+    };
+    window.addEventListener("pointerup", markDragDone, { once: true });
+    window.addEventListener("mouseup", markDragDone, { once: true });
+
+    if (isExpanded) {
+      setIsExpanded(false);
+      const result = await setNativePanelExpanded(false);
+      setExpandDirection(result.direction);
+    }
+
+    if (isDraggingPanelRef.current) {
+      await startPanelDrag();
+    }
+  }
+
+  if (isPanelWindow) {
+    return (
+      <main className="desktop-stage desktop-stage--panel">
+        <section
+          className={["panel-window", expandDirection === "down" ? "panel-window--open-down" : ""].filter(Boolean).join(" ")}
+          onPointerEnter={handlePanelPointerEnter}
+          onPointerLeave={handlePanelPointerLeave}
+          onContextMenu={handlePanelContextMenu}
+          aria-label="Deadline Panel"
+        >
+          <ExpandedPanel
+            currentTasks={currentTasks}
+            focusTasks={focusTasks}
+            focusLimit={focusLimit}
+            error={error}
+            message={commandMessage}
+            onHideTemporarily={handleHideTemporarily}
+          />
+        </section>
+      </main>
+    );
   }
 
   return (
-    <main className="desktop-stage">
+    <main className="desktop-stage desktop-stage--strip">
       <section
-        className={[
-          "deadline-widget",
-          isExpanded || forceExpanded ? "deadline-widget--expanded" : "",
-          expandDirection === "down" ? "deadline-widget--open-down" : ""
-        ].filter(Boolean).join(" ")}
-        onPointerEnter={handlePointerEnter}
-        onPointerLeave={handlePointerLeave}
+        className="strip-window"
+        onPointerEnter={handleStripPointerEnter}
+        onPointerLeave={handleStripPointerLeave}
         onContextMenu={handlePanelContextMenu}
         aria-label="Deadline Panel"
       >
@@ -436,16 +425,7 @@ export function App() {
           total={focusTasks.length}
           nearest={nearest}
           isLoading={isLoading}
-          onStartDrag={handleExpandedDragStart}
-        />
-        <ExpandedPanel
-          currentTasks={currentTasks}
-          focusTasks={focusTasks}
-          focusLimit={focusLimit}
-          error={error}
-          message={commandMessage}
-          onHideTemporarily={handleHideTemporarily}
-          onStartDrag={handleExpandedDragStart}
+          onStartDrag={(event) => void handleCollapsedDragStart(event)}
         />
       </section>
     </main>
@@ -490,8 +470,7 @@ function ExpandedPanel({
   focusLimit,
   error,
   message,
-  onHideTemporarily,
-  onStartDrag
+  onHideTemporarily
 }: {
   currentTasks: DeadlineTask[];
   focusTasks: DeadlineTask[];
@@ -499,20 +478,19 @@ function ExpandedPanel({
   error: string | null;
   message: string | null;
   onHideTemporarily: () => void;
-  onStartDrag: (event: PointerEvent<HTMLElement>) => void;
 }) {
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const firstReminder = currentTasks[0] ?? focusTasks[0];
 
   return (
-    <div className="expanded-panel" onPointerDown={onStartDrag}>
+    <div className="expanded-panel">
       {error ? <div className="notice notice--error">{error}</div> : null}
       {message ? <div className="notice">{message}</div> : null}
 
       <section className="panel-section panel-section--focus">
         <div className="focus-topline">
-          <p className="section-label">{ui.panel.inProgress}</p>
+          <p className="section-label">{currentTasks.length > 0 ? ui.panel.inProgress : ui.panel.nearestDeadline}</p>
           <button type="button" className="icon-button icon-button--quiet" title={ui.panel.hideTemporarily} onClick={onHideTemporarily}>
             <EyeOff aria-hidden="true" />
           </button>
@@ -1803,27 +1781,4 @@ function isInteractiveTarget(target: EventTarget): boolean {
 
 function isTextEditingTarget(target: EventTarget): boolean {
   return target instanceof Element && Boolean(target.closest("input,select,textarea"));
-}
-
-function isScrollbarPointer(event: PointerEvent<HTMLElement>): boolean {
-  let element = event.target instanceof HTMLElement ? event.target : null;
-  const boundary = event.currentTarget;
-
-  while (element && boundary.contains(element)) {
-    const style = window.getComputedStyle(element);
-    const isScrollableY =
-      (style.overflowY === "auto" || style.overflowY === "scroll") && element.scrollHeight > element.clientHeight;
-    if (isScrollableY) {
-      const rect = element.getBoundingClientRect();
-      const scrollbarWidth = Math.max(12, element.offsetWidth - element.clientWidth);
-      if (event.clientX >= rect.right - scrollbarWidth) {
-        return true;
-      }
-    }
-
-    if (element === boundary) break;
-    element = element.parentElement;
-  }
-
-  return false;
 }
