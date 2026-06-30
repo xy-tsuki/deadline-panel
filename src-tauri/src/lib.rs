@@ -35,6 +35,7 @@ const PANEL_COLLAPSED_HEIGHT: f64 = 44.0;
 const PANEL_MARGIN: i32 = 18;
 const PANEL_TRIGGER_EXTRA: i32 = 8;
 const PANEL_POSITION_SETTING_KEY: &str = "panel_position";
+const PANEL_ANCHOR_POSITION_SETTING_KEY: &str = "panel_anchor_position_v2";
 const SEED_TASKS_V2_SETTING_KEY: &str = "seed_tasks_v2";
 
 struct AppState {
@@ -48,6 +49,7 @@ struct PanelState {
     auto_hidden: bool,
     expanded: bool,
     dragging: bool,
+    open_down: bool,
     hide_token: u64,
 }
 
@@ -91,12 +93,19 @@ struct DeadlineTask {
 struct PanelPointerState {
     in_trigger: bool,
     in_window: bool,
+    expand_direction: &'static str,
     left_down: bool,
     right_down: bool,
     cursor_x: i32,
     cursor_y: i32,
     window_x: i32,
     window_y: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PanelExpandResult {
+    direction: &'static str,
 }
 
 #[tauri::command]
@@ -296,19 +305,53 @@ fn backup_database(state: tauri::State<'_, AppState>) -> Result<String, String> 
 }
 
 #[tauri::command]
+fn panel_expand_direction(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<PanelExpandResult, String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(PanelExpandResult { direction: "up" });
+    };
+    let open_down = {
+        let panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.open_down
+    };
+    let anchor = current_panel_anchor(&window, open_down).map_err(|error| error.to_string())?;
+    let should_open_down =
+        should_expand_panel_down(&window, anchor.1).map_err(|error| error.to_string())?;
+    Ok(PanelExpandResult {
+        direction: if should_open_down { "down" } else { "up" },
+    })
+}
+
+#[tauri::command]
 fn set_panel_expanded(
     expanded: bool,
     app: AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<PanelExpandResult, String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(PanelExpandResult { direction: "up" });
+    };
+
+    let previous_open_down = {
+        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        let previous_open_down = panel.open_down;
+        panel.expanded = expanded;
+        previous_open_down
+    };
+
+    let anchor =
+        current_panel_anchor(&window, previous_open_down).map_err(|error| error.to_string())?;
+    let open_down =
+        should_expand_panel_down(&window, anchor.1).map_err(|error| error.to_string())?;
+    position_window_for_anchor(&window, anchor.0, anchor.1, open_down)
+        .map_err(|error| error.to_string())?;
+
     {
         let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
-        panel.expanded = expanded;
+        panel.open_down = open_down;
     }
-
-    let Some(window) = app.get_webview_window("main") else {
-        return Ok(());
-    };
 
     window
         .set_focusable(expanded)
@@ -316,7 +359,9 @@ fn set_panel_expanded(
     window
         .set_ignore_cursor_events(!expanded)
         .map_err(|error| error.to_string())?;
-    Ok(())
+    Ok(PanelExpandResult {
+        direction: if open_down { "down" } else { "up" },
+    })
 }
 
 #[tauri::command]
@@ -326,6 +371,7 @@ fn hide_panel_temporarily(app: AppHandle, state: tauri::State<'_, AppState>) -> 
         panel.hide_token = panel.hide_token.wrapping_add(1);
         panel.manual_hidden = true;
         panel.expanded = false;
+        panel.open_down = false;
     }
     sync_panel_visibility(&app)
 }
@@ -342,6 +388,7 @@ fn hide_panel_for_duration(minutes: u64, app: &AppHandle) -> Result<(), String> 
         panel.hide_token = panel.hide_token.wrapping_add(1);
         panel.manual_hidden = true;
         panel.expanded = false;
+        panel.open_down = false;
         panel.hide_token
     };
     sync_panel_visibility(app)?;
@@ -356,6 +403,7 @@ fn hide_panel_for_duration(minutes: u64, app: &AppHandle) -> Result<(), String> 
             }
             panel.manual_hidden = false;
             panel.expanded = false;
+            panel.open_down = false;
         }
         let _ = sync_panel_visibility(&app);
     });
@@ -374,6 +422,7 @@ fn set_panel_auto_hidden(
         panel.auto_hidden = hidden;
         if hidden {
             panel.expanded = false;
+            panel.open_down = false;
         }
     }
     sync_panel_visibility(&app)
@@ -427,13 +476,19 @@ fn remember_panel_position(app: AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window("main") else {
         return Ok(());
     };
-    let position = window.outer_position().map_err(|error| error.to_string())?;
     let state = app.state::<AppState>();
+    let open_down = state
+        .panel
+        .lock()
+        .map_err(|error| error.to_string())?
+        .open_down;
+    let (anchor_x, anchor_y) =
+        current_panel_anchor(&window, open_down).map_err(|error| error.to_string())?;
     let db = state.db.lock().map_err(|error| error.to_string())?;
     set_app_setting_value(
         &db,
-        PANEL_POSITION_SETTING_KEY,
-        &format!("{},{}", position.x, position.y),
+        PANEL_ANCHOR_POSITION_SETTING_KEY,
+        &format!("{},{}", anchor_x, anchor_y),
     )
     .map_err(|error| error.to_string())
 }
@@ -444,8 +499,11 @@ fn reset_panel_position(app: AppHandle) -> Result<(), String> {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|error| error.to_string())?;
         db.execute(
-            "DELETE FROM app_settings WHERE key = ?1",
-            params![PANEL_POSITION_SETTING_KEY],
+            "DELETE FROM app_settings WHERE key IN (?1, ?2)",
+            params![
+                PANEL_POSITION_SETTING_KEY,
+                PANEL_ANCHOR_POSITION_SETTING_KEY
+            ],
         )
         .map_err(|error| error.to_string())?;
     }
@@ -479,6 +537,12 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     let hwnd_value = hwnd.0 as isize;
     let start_position = window.outer_position().map_err(|error| error.to_string())?;
+    let collapsed_offset = collapsed_strip_offset(&window).map_err(|error| error.to_string())?;
+    let start_open_down = {
+        let state = app.state::<AppState>();
+        let panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.open_down
+    };
     let mut start_cursor = POINT::default();
     unsafe { GetCursorPos(&mut start_cursor).map_err(|error| error.to_string())? };
 
@@ -497,6 +561,8 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
             start_position.y,
             start_cursor.x,
             start_cursor.y,
+            collapsed_offset,
+            start_open_down,
         );
     });
 
@@ -544,6 +610,7 @@ pub fn run() {
                     auto_hidden: false,
                     expanded: false,
                     dragging: false,
+                    open_down: false,
                     hide_token: 0,
                 }),
             });
@@ -566,6 +633,7 @@ pub fn run() {
             data_file_path,
             open_data_dir,
             backup_database,
+            panel_expand_direction,
             set_panel_expanded,
             hide_panel_temporarily,
             hide_panel_for_minutes,
@@ -596,7 +664,7 @@ fn position_main_window(
 
     window.set_shadow(false)?;
     window.set_skip_taskbar(true)?;
-    set_window_bounds_from_saved_or_bottom_right(&window, db)?;
+    let _ = set_window_bounds_from_saved_or_bottom_right(&window, db)?;
     window.set_focusable(false)?;
     window.set_ignore_cursor_events(true)?;
     Ok(())
@@ -613,6 +681,7 @@ fn show_panel_collapsed(
         panel.manual_hidden = false;
         panel.auto_hidden = false;
         panel.expanded = false;
+        panel.open_down = false;
     }
 
     let Some(window) = app.get_webview_window("main") else {
@@ -629,11 +698,23 @@ fn show_panel_collapsed(
     if reset_position {
         set_window_bounds_bottom_right(&window, PANEL_WIDTH, PANEL_EXPANDED_HEIGHT)
             .map_err(|error| error.to_string())?;
+        let state = app.state::<AppState>();
+        {
+            if let Ok(mut panel) = state.panel.lock() {
+                panel.open_down = false;
+            }
+        };
     } else {
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|error| error.to_string())?;
-        set_window_bounds_from_saved_or_bottom_right(&window, &db)
+        let open_down = set_window_bounds_from_saved_or_bottom_right(&window, &db)
             .map_err(|error| error.to_string())?;
+        drop(db);
+        {
+            if let Ok(mut panel) = state.panel.lock() {
+                panel.open_down = open_down;
+            }
+        };
     }
     window
         .set_focusable(false)
@@ -665,8 +746,12 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|error| error.to_string())?;
-        set_window_bounds_from_saved_or_bottom_right(&window, &db)
+        let open_down = set_window_bounds_from_saved_or_bottom_right(&window, &db)
             .map_err(|error| error.to_string())?;
+        drop(db);
+        if let Ok(mut panel) = state.panel.lock() {
+            panel.open_down = open_down;
+        }
         window
             .set_focusable(expanded)
             .map_err(|error| error.to_string())?;
@@ -864,24 +949,41 @@ fn set_window_bounds_bottom_right(
 fn set_window_bounds_from_saved_or_bottom_right(
     window: &tauri::WebviewWindow,
     db: &Connection,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     window.set_size(Size::Logical(LogicalSize {
         width: PANEL_WIDTH,
         height: PANEL_EXPANDED_HEIGHT,
     }))?;
 
-    if let Some((x, y)) = get_saved_panel_position(db)? {
-        window.set_position(PhysicalPosition::new(x, y))?;
-        return Ok(());
+    if let Some((anchor_x, anchor_y)) = get_saved_panel_anchor_position(window, db)? {
+        let open_down = should_expand_panel_down(window, anchor_y)?;
+        position_window_for_anchor(window, anchor_x, anchor_y, open_down)?;
+        return Ok(open_down);
     }
 
-    set_window_bounds_bottom_right(window, PANEL_WIDTH, PANEL_EXPANDED_HEIGHT)
+    set_window_bounds_bottom_right(window, PANEL_WIDTH, PANEL_EXPANDED_HEIGHT)?;
+    Ok(false)
 }
 
-fn get_saved_panel_position(
+fn get_saved_panel_anchor_position(
+    window: &tauri::WebviewWindow,
     db: &Connection,
 ) -> Result<Option<(i32, i32)>, Box<dyn std::error::Error>> {
-    let Some(value) = get_app_setting_value(db, PANEL_POSITION_SETTING_KEY)? else {
+    if let Some(anchor) = get_saved_position_value(db, PANEL_ANCHOR_POSITION_SETTING_KEY)? {
+        return Ok(Some(anchor));
+    }
+
+    let Some((x, y)) = get_saved_position_value(db, PANEL_POSITION_SETTING_KEY)? else {
+        return Ok(None);
+    };
+    Ok(Some((x, y + collapsed_strip_offset(window)?)))
+}
+
+fn get_saved_position_value(
+    db: &Connection,
+    key: &str,
+) -> Result<Option<(i32, i32)>, Box<dyn std::error::Error>> {
+    let Some(value) = get_app_setting_value(db, key)? else {
         return Ok(None);
     };
     let Some((x_text, y_text)) = value.split_once(',') else {
@@ -894,6 +996,70 @@ fn get_saved_panel_position(
         return Ok(None);
     };
     Ok(Some((x, y)))
+}
+
+fn collapsed_strip_offset(
+    window: &tauri::WebviewWindow,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    let scale = window.scale_factor()?;
+    Ok(((PANEL_EXPANDED_HEIGHT - PANEL_COLLAPSED_HEIGHT) * scale).round() as i32)
+}
+
+fn current_panel_anchor(
+    window: &tauri::WebviewWindow,
+    open_down: bool,
+) -> Result<(i32, i32), Box<dyn std::error::Error>> {
+    let position = window.outer_position()?;
+    let anchor_y = if open_down {
+        position.y
+    } else {
+        position.y + collapsed_strip_offset(window)?
+    };
+    Ok((position.x, anchor_y))
+}
+
+fn position_window_for_anchor(
+    window: &tauri::WebviewWindow,
+    anchor_x: i32,
+    anchor_y: i32,
+    open_down: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let y = if open_down {
+        anchor_y
+    } else {
+        anchor_y - collapsed_strip_offset(window)?
+    };
+    window.set_position(PhysicalPosition::new(anchor_x, y))?;
+    Ok(())
+}
+
+fn should_expand_panel_down(
+    window: &tauri::WebviewWindow,
+    anchor_y: i32,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let Some(monitor) = window.current_monitor()? else {
+        return Ok(false);
+    };
+
+    let work_area = monitor.work_area();
+    let work_top = work_area.position.y;
+    let work_bottom = work_area.position.y + work_area.size.height as i32;
+    let scale = monitor.scale_factor();
+    let margin = (PANEL_MARGIN as f64 * scale).round() as i32;
+    let full_height = (PANEL_EXPANDED_HEIGHT * scale).round() as i32;
+    let collapsed_height = (PANEL_COLLAPSED_HEIGHT * scale).round() as i32;
+    let required_above = full_height - collapsed_height + margin;
+    let required_below = full_height + margin;
+    let available_above = anchor_y - work_top;
+    let available_below = work_bottom - anchor_y;
+
+    if available_above >= required_above {
+        return Ok(false);
+    }
+    if available_below >= required_below {
+        return Ok(true);
+    }
+    Ok(available_below > available_above)
 }
 
 #[cfg(windows)]
@@ -1141,6 +1307,10 @@ fn cursor_is_in_panel_trigger(app: &AppHandle) -> Result<bool, Box<dyn std::erro
         return Ok(false);
     };
 
+    let open_down = app
+        .try_state::<AppState>()
+        .and_then(|state| state.panel.lock().ok().map(|panel| panel.open_down))
+        .unwrap_or(false);
     let position = window.outer_position()?;
     let size = window.outer_size()?;
     let scale = window.scale_factor()?;
@@ -1151,7 +1321,12 @@ fn cursor_is_in_panel_trigger(app: &AppHandle) -> Result<bool, Box<dyn std::erro
     let left = position.x;
     let right = position.x + size.width as i32;
     let bottom = position.y + size.height as i32;
-    let top = bottom - trigger_height;
+    let window_top = position.y;
+    let (top, bottom) = if open_down {
+        (window_top, window_top + trigger_height)
+    } else {
+        (bottom - trigger_height, bottom)
+    };
 
     Ok(cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= bottom)
 }
@@ -1169,6 +1344,7 @@ fn get_panel_pointer_state(
         return Ok(PanelPointerState {
             in_trigger: false,
             in_window: false,
+            expand_direction: "up",
             left_down: false,
             right_down: false,
             cursor_x: 0,
@@ -1178,6 +1354,10 @@ fn get_panel_pointer_state(
         });
     };
 
+    let open_down = app
+        .try_state::<AppState>()
+        .and_then(|state| state.panel.lock().ok().map(|panel| panel.open_down))
+        .unwrap_or(false);
     let panel_hwnd = window.hwnd()?;
     let position = window.outer_position()?;
     let size = window.outer_size()?;
@@ -1190,11 +1370,15 @@ fn get_panel_pointer_state(
     let right = position.x + size.width as i32;
     let bottom = position.y + size.height as i32;
     let window_top = position.y;
-    let top = bottom - trigger_height;
+    let (top, trigger_bottom) = if open_down {
+        (window_top, window_top + trigger_height)
+    } else {
+        (bottom - trigger_height, bottom)
+    };
     let in_window =
         cursor.x >= left && cursor.x <= right && cursor.y >= window_top && cursor.y <= bottom;
     let raw_in_trigger =
-        cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= bottom;
+        cursor.x >= left && cursor.x <= right && cursor.y >= top && cursor.y <= trigger_bottom;
     let in_trigger = raw_in_trigger
         && !cursor_is_occluded_above_panel(panel_hwnd, cursor)
         && !foreground_shell_overlay_covers_cursor(cursor);
@@ -1204,6 +1388,7 @@ fn get_panel_pointer_state(
     Ok(PanelPointerState {
         in_trigger,
         in_window,
+        expand_direction: if open_down { "down" } else { "up" },
         left_down,
         right_down,
         cursor_x: cursor.x,
@@ -1220,6 +1405,7 @@ fn get_panel_pointer_state(
     Ok(PanelPointerState {
         in_trigger: false,
         in_window: false,
+        expand_direction: "up",
         left_down: false,
         right_down: false,
         cursor_x: 0,
@@ -1237,6 +1423,8 @@ fn run_panel_drag_loop(
     start_window_y: i32,
     start_cursor_x: i32,
     start_cursor_y: i32,
+    collapsed_offset: i32,
+    start_open_down: bool,
 ) {
     let hwnd = HWND(hwnd_value as *mut _);
     let mut final_x = start_window_x;
@@ -1263,15 +1451,34 @@ fn run_panel_drag_loop(
     let _ = app.run_on_main_thread(move || {
         let state = main_app.state::<AppState>();
         if let Ok(db) = state.db.lock() {
+            let anchor_y = if start_open_down {
+                final_y
+            } else {
+                final_y + collapsed_offset
+            };
             let _ = set_app_setting_value(
                 &db,
-                PANEL_POSITION_SETTING_KEY,
-                &format!("{},{}", final_x, final_y),
+                PANEL_ANCHOR_POSITION_SETTING_KEY,
+                &format!("{},{}", final_x, anchor_y),
             );
+        }
+
+        let mut next_open_down = start_open_down;
+        if let Some(window) = main_app.get_webview_window("main") {
+            let anchor_y = if start_open_down {
+                final_y
+            } else {
+                final_y + collapsed_offset
+            };
+            if let Ok(open_down) = should_expand_panel_down(&window, anchor_y) {
+                next_open_down = open_down;
+                let _ = position_window_for_anchor(&window, final_x, anchor_y, open_down);
+            }
         }
 
         let expanded = if let Ok(mut panel) = state.panel.lock() {
             panel.dragging = false;
+            panel.open_down = next_open_down;
             panel.expanded
         } else {
             false

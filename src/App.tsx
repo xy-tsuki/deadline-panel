@@ -32,6 +32,7 @@ import {
   getAutostartEnabled,
   backupDatabase,
   getDataFilePath,
+  getPanelExpandDirection,
   getPanelPointerState,
   hidePanelTemporarily,
   hidePanelForMinutes,
@@ -110,6 +111,7 @@ interface LatestReleaseResponse {
 
 export function App() {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [expandDirection, setExpandDirection] = useState<"up" | "down">("up");
   const collapseTimerRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
   const lastAutoHiddenRef = useRef(false);
@@ -173,7 +175,7 @@ export function App() {
 
   useEffect(() => {
     if (forceExpanded) {
-      expandPanel();
+      void expandPanel();
     }
   }, [forceExpanded]);
 
@@ -247,6 +249,9 @@ export function App() {
         if (!isMounted || !state) return;
 
         const previousButtons = pointerButtonsRef.current;
+        if (!isExpanded && !forceExpanded) {
+          setExpandDirection(state.expandDirection);
+        }
         const shouldAcceptCollapsedInput = !isExpanded && !forceExpanded && state.inTrigger;
         if (collapsedInputRef.current !== shouldAcceptCollapsedInput) {
           collapsedInputRef.current = shouldAcceptCollapsedInput;
@@ -273,7 +278,7 @@ export function App() {
           hoverStartRef.current ??= Date.now();
           nextInterval = TRIGGER_ACTIVE_CHECK_INTERVAL_MS;
           if (Date.now() - hoverStartRef.current >= COLLAPSED_HOVER_DWELL_MS) {
-            expandPanel();
+            void expandPanel();
             hoverStartRef.current = null;
           }
         } else if (!state.inTrigger) {
@@ -347,13 +352,19 @@ export function App() {
     collapsePanel();
   }
 
-  function expandPanel() {
+  async function expandPanel() {
     clearCollapseTimer();
     clearAnimationTimer();
     collapsedInputRef.current = false;
-    setIsExpanded(true);
     void runSilentCloudSync(CLOUD_SYNC_EXPAND_MIN_INTERVAL_MS);
-    void setNativePanelExpanded(true);
+
+    const preview = await getPanelExpandDirection();
+    setExpandDirection(preview.direction);
+    await nextAnimationFrame();
+
+    const result = await setNativePanelExpanded(true);
+    setExpandDirection(result.direction);
+    setIsExpanded(true);
   }
 
   function collapsePanel() {
@@ -361,14 +372,17 @@ export function App() {
     setIsExpanded(false);
     animationTimerRef.current = window.setTimeout(() => {
       collapsedInputRef.current = false;
-      void setNativePanelExpanded(false);
-      animationTimerRef.current = null;
+      void (async () => {
+        const result = await setNativePanelExpanded(false);
+        setExpandDirection(result.direction);
+        animationTimerRef.current = null;
+      })();
     }, COLLAPSE_ANIMATION_MS);
   }
 
   function handlePointerEnter() {
     if (!isTauriRuntime()) {
-      expandPanel();
+      void expandPanel();
     }
   }
 
@@ -382,7 +396,8 @@ export function App() {
     clearCollapseTimer();
     clearAnimationTimer();
     setIsExpanded(false);
-    await setNativePanelExpanded(false);
+    const result = await setNativePanelExpanded(false);
+    setExpandDirection(result.direction);
     await hidePanelTemporarily();
   }
 
@@ -406,7 +421,11 @@ export function App() {
   return (
     <main className="desktop-stage">
       <section
-        className={`deadline-widget ${isExpanded || forceExpanded ? "deadline-widget--expanded" : ""}`}
+        className={[
+          "deadline-widget",
+          isExpanded || forceExpanded ? "deadline-widget--expanded" : "",
+          expandDirection === "down" ? "deadline-widget--open-down" : ""
+        ].filter(Boolean).join(" ")}
         onPointerEnter={handlePointerEnter}
         onPointerLeave={handlePointerLeave}
         onContextMenu={handlePanelContextMenu}
@@ -1770,6 +1789,12 @@ function compareVersions(left: string, right: string): number {
 
 function formatTemplate(template: string, values: Record<string, string>): string {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{${key}}`).join(value), template);
+}
+
+function nextAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function isInteractiveTarget(target: EventTarget): boolean {

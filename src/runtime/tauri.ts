@@ -4,6 +4,7 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 export interface PanelPointerState {
   inTrigger: boolean;
   inWindow: boolean;
+  expandDirection: "up" | "down";
   leftDown: boolean;
   rightDown: boolean;
   cursorX: number;
@@ -12,16 +13,28 @@ export interface PanelPointerState {
   windowY: number;
 }
 
+export interface PanelExpandResult {
+  direction: "up" | "down";
+}
+
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
-export async function setPanelExpanded(expanded: boolean): Promise<void> {
+export async function setPanelExpanded(expanded: boolean): Promise<PanelExpandResult> {
   if (!isTauriRuntime()) {
-    return;
+    return { direction: "up" };
   }
 
-  await invoke("set_panel_expanded", { expanded });
+  return invoke<PanelExpandResult>("set_panel_expanded", { expanded });
+}
+
+export async function getPanelExpandDirection(): Promise<PanelExpandResult> {
+  if (!isTauriRuntime()) {
+    return { direction: "up" };
+  }
+
+  return invoke<PanelExpandResult>("panel_expand_direction");
 }
 
 export async function hidePanelTemporarily(): Promise<void> {
