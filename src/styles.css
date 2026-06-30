@@ -77,6 +77,12 @@ button {
   pointer-events: auto;
 }
 
+.deadline-widget--open-down {
+  top: 0;
+  bottom: auto;
+  flex-direction: column;
+}
+
 .expanded-panel {
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
