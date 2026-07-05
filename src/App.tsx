@@ -68,6 +68,8 @@ const UPDATE_DOWNLOAD_TIMEOUT_MS = 180_000;
 const updaterStatusText = {
   zh: {
     available: "发现新版本 {version}，正在准备下载",
+    confirmInstall: "发现新版本 {version}。是否现在下载并安装？",
+    cancelled: "已取消更新",
     downloading: "正在下载更新...",
     downloadingProgress: "正在下载更新 {progress}%",
     installing: "正在安装更新...",
@@ -75,6 +77,8 @@ const updaterStatusText = {
   },
   ja: {
     available: "新しいバージョン {version} を見つけました。ダウンロードを準備しています",
+    confirmInstall: "新しいバージョン {version} があります。今すぐダウンロードしてインストールしますか？",
+    cancelled: "更新をキャンセルしました",
     downloading: "更新をダウンロードしています...",
     downloadingProgress: "更新をダウンロードしています {progress}%",
     installing: "更新をインストールしています...",
@@ -82,6 +86,8 @@ const updaterStatusText = {
   },
   en: {
     available: "Version {version} is available. Preparing download",
+    confirmInstall: "Version {version} is available. Download and install it now?",
+    cancelled: "Update cancelled",
     downloading: "Downloading update...",
     downloadingProgress: "Downloading update {progress}%",
     installing: "Installing update...",
@@ -225,7 +231,7 @@ export function App() {
   useEffect(() => {
     if (!isTauriRuntime() || isPanelWindow) return;
 
-    const interval = window.setInterval(() => void load(), 5000);
+    const interval = window.setInterval(() => void load({ silent: true }), 5000);
     return () => window.clearInterval(interval);
   }, [isPanelWindow, load]);
 
@@ -1226,7 +1232,14 @@ function SettingsPanel() {
 
         let downloadedBytes = 0;
         let totalBytes = 0;
-        setMessage(formatTemplate(updaterText.available, { version: normalizeVersion(update.version) }));
+        const version = normalizeVersion(update.version);
+        const confirmed = window.confirm(formatTemplate(updaterText.confirmInstall, { version }));
+        if (!confirmed) {
+          setMessage(updaterText.cancelled);
+          return;
+        }
+
+        setMessage(formatTemplate(updaterText.available, { version }));
         await update.downloadAndInstall((event: DownloadEvent) => {
           if (event.event === "Started") {
             downloadedBytes = 0;

@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 export interface PanelPointerState {
   inTrigger: boolean;
@@ -178,7 +177,7 @@ export async function getAutostartEnabled(): Promise<boolean> {
     return false;
   }
 
-  return isEnabled();
+  return invoke<boolean>("get_autostart_enabled");
 }
 
 export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
@@ -186,11 +185,5 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
     return false;
   }
 
-  if (enabled) {
-    await enable();
-  } else {
-    await disable();
-  }
-
-  return isEnabled();
+  return invoke<boolean>("set_autostart_enabled", { enabled });
 }

@@ -16,6 +16,7 @@ use tauri::{
 #[cfg(windows)]
 use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
+    Globalization::GetUserDefaultUILanguage,
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST},
     System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
@@ -38,6 +39,10 @@ const PANEL_MARGIN: i32 = 18;
 const PANEL_POSITION_SETTING_KEY: &str = "panel_position";
 const PANEL_ANCHOR_POSITION_SETTING_KEY: &str = "panel_anchor_position_v2";
 const SEED_TASKS_V2_SETTING_KEY: &str = "seed_tasks_v2";
+#[cfg(windows)]
+const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+#[cfg(windows)]
+const AUTOSTART_REG_VALUE: &str = "Deadline Panel";
 
 struct AppState {
     db: Mutex<Connection>,
@@ -612,6 +617,17 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+fn get_autostart_enabled() -> Result<bool, String> {
+    autostart_enabled().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
+    set_autostart_enabled_native(enabled).map_err(|error| error.to_string())?;
+    autostart_enabled().map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
@@ -681,7 +697,9 @@ pub fn run() {
             show_panel_context_menu,
             start_panel_drag,
             finish_panel_drag,
-            quit_app
+            quit_app,
+            get_autostart_enabled,
+            set_autostart_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deadline Panel");
@@ -922,24 +940,88 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
 }
 
 fn restart_app(app: &AppHandle) {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if Command::new(exe_path).spawn().is_ok() {
-            app.exit(0);
-        }
+    app.restart();
+}
+
+#[cfg(windows)]
+fn normalized_windows_path(path: &std::path::Path) -> Option<String> {
+    let text = path.to_str()?.to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        Some(format!(r"\\{}", rest))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        Some(rest.to_string())
+    } else {
+        Some(text)
     }
 }
 
+#[cfg(windows)]
+fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+    let exe_path = current_exe_for_shell()?;
+    let output = Command::new("reg")
+        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE])
+        .output()?;
+
+    if !output.status.success() {
+        return Ok(false);
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+    Ok(stdout.contains(&exe_path.to_ascii_lowercase()))
+}
+
+#[cfg(not(windows))]
+fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn set_autostart_enabled_native(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+    if enabled {
+        let value = format!("\"{}\"", current_exe_for_shell()?);
+        let status = Command::new("reg")
+            .args([
+                "add",
+                AUTOSTART_REG_KEY,
+                "/v",
+                AUTOSTART_REG_VALUE,
+                "/t",
+                "REG_SZ",
+                "/d",
+                value.as_str(),
+                "/f",
+            ])
+            .status()?;
+
+        if !status.success() {
+            return Err("failed to write startup registry value".into());
+        }
+    } else {
+        let status = Command::new("reg")
+            .args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE, "/f"])
+            .status()?;
+
+        if !status.success() && autostart_enabled()? {
+            return Err("failed to remove startup registry value".into());
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn set_autostart_enabled_native(_enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+#[cfg(windows)]
+fn current_exe_for_shell() -> Result<String, Box<dyn std::error::Error>> {
+    normalized_windows_path(&std::env::current_exe()?)
+        .ok_or_else(|| "current executable path is not valid UTF-8".into())
+}
+
 fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
-    let language = app
-        .try_state::<AppState>()
-        .and_then(|state| {
-            state
-                .db
-                .lock()
-                .ok()
-                .and_then(|db| get_app_setting_value(&db, "app_language").ok().flatten())
-        })
-        .unwrap_or_else(|| "zh".to_string());
+    let language = resolved_native_language(app);
 
     match language.as_str() {
         "ja" => NativeMenuLabels {
@@ -973,6 +1055,16 @@ fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
 }
 
 fn native_restart_label(app: &AppHandle) -> &'static str {
+    let language = resolved_native_language(app);
+
+    match language.as_str() {
+        "ja" => "再起動",
+        "en" => "Restart",
+        _ => "重启",
+    }
+}
+
+fn resolved_native_language(app: &AppHandle) -> String {
     let language = app
         .try_state::<AppState>()
         .and_then(|state| {
@@ -982,12 +1074,38 @@ fn native_restart_label(app: &AppHandle) -> &'static str {
                 .ok()
                 .and_then(|db| get_app_setting_value(&db, "app_language").ok().flatten())
         })
-        .unwrap_or_else(|| "zh".to_string());
+        .unwrap_or_else(|| "system".to_string());
 
     match language.as_str() {
-        "ja" => "再起動",
-        "en" => "Restart",
-        _ => "重启",
+        "zh" | "ja" | "en" => language,
+        _ => system_native_language().to_string(),
+    }
+}
+
+#[cfg(windows)]
+fn system_native_language() -> &'static str {
+    let lang_id = unsafe { GetUserDefaultUILanguage() };
+    let primary_language = lang_id & 0x03ff;
+    match primary_language {
+        0x04 => "zh",
+        0x11 => "ja",
+        _ => "en",
+    }
+}
+
+#[cfg(not(windows))]
+fn system_native_language() -> &'static str {
+    let locale = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if locale.starts_with("zh") {
+        "zh"
+    } else if locale.starts_with("ja") {
+        "ja"
+    } else {
+        "en"
     }
 }
 

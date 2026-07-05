@@ -12,6 +12,10 @@ interface SyncOptions {
   silent?: boolean;
 }
 
+interface LoadOptions {
+  silent?: boolean;
+}
+
 interface DeadlineState {
   tasks: DeadlineTask[];
   focusLimit: FocusLimit;
@@ -19,7 +23,7 @@ interface DeadlineState {
   isLoading: boolean;
   error: string | null;
   commandMessage: string | null;
-  load: () => Promise<void>;
+  load: (options?: LoadOptions) => Promise<void>;
   setFocusLimit: (limit: FocusLimit) => Promise<void>;
   setLanguage: (language: AppLanguage) => Promise<void>;
   addTask: (input: NewTaskInput) => Promise<void>;
@@ -47,8 +51,11 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
   error: null,
   commandMessage: null,
 
-  async load() {
-    set({ isLoading: true, error: null });
+  async load(options) {
+    const isSilent = options?.silent ?? false;
+    if (!isSilent) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const tasks = await loadTasks();
       const storedLimit = await loadSetting(FOCUS_LIMIT_SETTING_KEY).catch(() => null);
@@ -57,10 +64,13 @@ export const useDeadlineStore = create<DeadlineState>((set, get) => ({
         tasks: sortDeadlineTasks(tasks),
         focusLimit: parseFocusLimit(storedLimit),
         language: parseLanguage(storedLanguage),
-        isLoading: false
+        isLoading: isSilent ? get().isLoading : false
       });
     } catch (error) {
-      set({ error: getErrorMessage(error), isLoading: false });
+      set({
+        error: getErrorMessage(error),
+        isLoading: isSilent ? get().isLoading : false
+      });
     }
   },
 
