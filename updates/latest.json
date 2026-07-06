@@ -1,11 +1,11 @@
 {
-  "version": "0.4.3",
-  "notes": "Deadline Panel v0.4.3",
-  "pub_date": "2026-06-29T16:11:43.135Z",
+  "version": "0.5.1",
+  "notes": "Deadline Panel v0.5.1",
+  "pub_date": "2026-07-06T14:48:25.683Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTkYyWnJUTzlOTmlQdEU0aEQ3S2tRWWpYVU5VZWdaYlVNTEx5RHpCUHZqY0VMeFNUQWFTNUpGWTF6d1liYWQ0UEdMZkZZWWp3NTcyTENVRDRjMFFUM01BdDVpRjZiSGdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgyNzQ5NTAyCWZpbGU6RGVhZGxpbmUgUGFuZWxfMC40LjNfeDY0LXNldHVwLmV4ZQppdnJBVUF0OTJkeFl1UFhURVlCUjJlckR3WGsrU3Uzci9HV1hwa1kzL285TXEzMEJ6dndRa0JValNTaXk2Q0w5MWl3bmlENFNGNE0yKytIVFJ6L2VDZz09Cg==",
-      "url": "https://github.com/xy-tsuki/deadline-panel/releases/download/v0.4.3/Deadline.Panel_0.4.3_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUTkYyWnJUTzlOTmlKM29PUTZjelFGSlJ1ejNpRE1TeUpCME5ON3JrK0d3eU1sSE5MZmgzMzhFNjNRMDJPeVRRYUlzUHBwVkE5Ry81MloxSXlXVzlxVFg1eko0SisxL2cwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzMjc2MjMxCWZpbGU6RGVhZGxpbmUgUGFuZWxfMC41LjFfeDY0LXNldHVwLmV4ZQptSHlrTk5idFV6RDZVODlHbzFIbXRBTE1SV28xWE9JRlNPRzZXMHVTeUJKU3VzMW1CQUpjVWgzM1RiRFp1VFo0eU1lVkU1MU85NEhZWlRTVnVITzdBZz09Cg==",
+      "url": "https://github.com/xy-tsuki/deadline-panel/releases/download/v0.5.1/Deadline.Panel_0.5.1_x64-setup.exe"
     }
   }
 }
