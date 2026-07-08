@@ -106,7 +106,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.24);
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(18, 24, 34, 0.44);
+  background: rgba(18, 24, 34, 0.4);
   color: var(--muted);
   cursor: default;
   font-size: 13px;
@@ -141,7 +141,7 @@ button {
   overflow: hidden auto;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: rgba(18, 24, 34, 0.38);
+  background: rgba(18, 24, 34, 0.4);
   opacity: 1;
   transform: translateX(0) translateY(0);
   visibility: visible;

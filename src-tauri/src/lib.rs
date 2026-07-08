@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{MenuBuilder, MenuItem, MenuItemBuilder},
     tray::TrayIconBuilder,
     AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
 };
@@ -67,6 +67,8 @@ struct AppState {
     db: Mutex<Connection>,
     db_path: PathBuf,
     panel: Mutex<PanelState>,
+    #[cfg(target_os = "macos")]
+    dock_menu_item: Mutex<Option<MenuItem<tauri::Wry>>>,
 }
 
 struct PanelState {
@@ -595,7 +597,7 @@ fn show_panel_context_menu(app: AppHandle) -> Result<(), String> {
     let Some(window) = window else {
         return Ok(());
     };
-    let menu = build_panel_menu(&app).map_err(|error| error.to_string())?;
+    let menu = build_panel_menu(&app, false).map_err(|error| error.to_string())?;
     window.popup_menu(&menu).map_err(|error| error.to_string())
 }
 
@@ -797,6 +799,8 @@ pub fn run() {
                     hide_token: 0,
                     dock_visible: false,
                 }),
+                #[cfg(target_os = "macos")]
+                dock_menu_item: Mutex::new(None),
             });
             #[cfg(target_os = "macos")]
             set_macos_dock_icon_visible(app.handle(), false).map_err(|error| error.to_string())?;
@@ -1036,7 +1040,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
 }
 
 fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let menu = build_panel_menu(app.handle())?;
+    let menu = build_panel_menu(app.handle(), true)?;
     let icon = load_menu_bar_icon().unwrap_or_else(|_| {
         app.default_window_icon()
             .cloned()
@@ -1088,12 +1092,15 @@ fn refresh_tray_menu(app: &AppHandle) {
     let Some(tray) = app.tray_by_id("main-tray") else {
         return;
     };
-    if let Ok(menu) = build_panel_menu(app) {
+    if let Ok(menu) = build_panel_menu(app, true) {
         let _ = tray.set_menu(Some(menu));
     }
 }
 
-fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+fn build_panel_menu(
+    app: &AppHandle,
+    remember_dock_item: bool,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let labels = native_menu_labels(app);
     let show = MenuItemBuilder::with_id("show_panel", labels.show_panel).build(app)?;
     let pause = MenuItemBuilder::with_id("pause_panel", labels.pause_panel).build(app)?;
@@ -1112,7 +1119,15 @@ fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::W
         } else {
             labels.show_dock
         };
-        MenuItemBuilder::with_id("toggle_dock_icon", label).build(app)?
+        let item = MenuItemBuilder::with_id("toggle_dock_icon", label).build(app)?;
+        if remember_dock_item {
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut dock_menu_item) = state.dock_menu_item.lock() {
+                    *dock_menu_item = Some(item.clone());
+                }
+            }
+        }
+        item
     };
     let restart = MenuItemBuilder::with_id("restart", native_restart_label(app)).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", labels.quit).build(app)?;
@@ -1169,35 +1184,46 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
 fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
     let next_visible = {
         let state = app.state::<AppState>();
-        let panel = state.panel.lock().map_err(|error| error.to_string())?;
-        !panel.dock_visible
+        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        let next_visible = !panel.dock_visible;
+        panel.dock_visible = next_visible;
+        next_visible
     };
 
-    set_macos_dock_icon_visible(app, next_visible)?;
-
-    {
+    update_dock_menu_item_label(app, next_visible);
+    if let Err(error) = set_macos_dock_icon_visible(app, next_visible) {
         let state = app.state::<AppState>();
         let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
-        panel.dock_visible = next_visible;
+        panel.dock_visible = !next_visible;
+        update_dock_menu_item_label(app, !next_visible);
+        return Err(error);
     }
-    refresh_tray_menu(app);
+
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
 fn set_macos_dock_icon_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
     app.set_dock_visibility(visible)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())
+}
 
-    if !visible {
-        let app = app.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(1200));
-            let _ = app.set_dock_visibility(false);
-        });
+#[cfg(target_os = "macos")]
+fn update_dock_menu_item_label(app: &AppHandle, dock_visible: bool) {
+    let labels = native_menu_labels(app);
+    let label = if dock_visible {
+        labels.hide_dock
+    } else {
+        labels.show_dock
+    };
+    let state = app.state::<AppState>();
+    if let Ok(dock_menu_item) = state.dock_menu_item.lock() {
+        if let Some(item) = dock_menu_item.as_ref() {
+            let _ = item.set_text(label);
+            return;
+        }
     }
-
-    Ok(())
+    refresh_tray_menu(app);
 }
 
 #[cfg(not(target_os = "macos"))]
