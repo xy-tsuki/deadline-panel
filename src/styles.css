@@ -3,20 +3,27 @@
   --bg: #0f1217;
   --desktop-a: #11151c;
   --desktop-b: #1c222b;
-  --panel: rgba(25, 29, 36, 0.94);
-  --panel-strong: rgba(30, 35, 43, 0.98);
-  --panel-soft: rgba(255, 255, 255, 0.045);
-  --line: rgba(255, 255, 255, 0.1);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --text: #eef2f8;
-  --muted: #9aa5b5;
-  --subtle: #6f7b8e;
-  --accent: #82b8ff;
-  --accent-strong: #a8ccff;
+  --panel: rgba(28, 34, 44, 0.58);
+  --panel-strong: rgba(30, 36, 47, 0.66);
+  --panel-soft: rgba(255, 255, 255, 0.075);
+  --glass-wash: rgba(255, 255, 255, 0.11);
+  --glass-tint: rgba(142, 184, 232, 0.13);
+  --glass-depth: rgba(8, 12, 18, 0.34);
+  --line: rgba(255, 255, 255, 0.18);
+  --line-strong: rgba(255, 255, 255, 0.28);
+  --text: #f4f7fb;
+  --muted: #b5bfce;
+  --subtle: #8792a2;
+  --accent: #91c4ff;
+  --accent-strong: #c8e0ff;
   --warning: #f5bc63;
   --danger: #ff7f7f;
   --success: #9bd88f;
-  --shadow: 0 24px 80px rgba(0, 0, 0, 0.38);
+  --shadow:
+    0 24px 78px rgba(0, 0, 0, 0.34),
+    0 4px 18px rgba(144, 190, 255, 0.11),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08);
   font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -94,14 +101,24 @@ button {
   gap: 9px;
   align-items: center;
   min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.26);
   padding: 10px 12px;
   border-radius: 8px;
-  background: #171b22;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 28%),
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.32), transparent 34%),
+    linear-gradient(155deg, rgba(37, 47, 62, 0.56), rgba(17, 22, 30, 0.72));
   color: var(--muted);
   cursor: default;
   font-size: 13px;
   line-height: 1.35;
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.28),
+    0 2px 12px rgba(130, 184, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: saturate(1.55) blur(24px);
+  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .desktop-stage input,
@@ -127,20 +144,25 @@ button {
 .expanded-panel {
   max-height: 100vh;
   overflow: hidden auto;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: var(--panel-strong);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent 22%),
+    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, 0.18), transparent 28%),
+    radial-gradient(circle at 92% 8%, rgba(145, 196, 255, 0.16), transparent 24%),
+    linear-gradient(155deg, rgba(32, 40, 52, 0.64), rgba(13, 18, 26, 0.76));
   opacity: 1;
   transform: translateX(0) translateY(0);
   visibility: visible;
   pointer-events: auto;
   box-shadow: var(--shadow);
-  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: saturate(1.65) blur(30px);
+  backdrop-filter: saturate(1.65) blur(30px);
 }
 
 .panel-section {
   padding: 15px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.115);
 }
 
 .panel-section:last-child {
@@ -191,10 +213,11 @@ button {
   display: inline-flex;
   align-items: center;
   min-height: 22px;
-  border: 1px solid rgba(130, 184, 255, 0.18);
+  border: 1px solid rgba(200, 224, 255, 0.22);
   border-radius: 999px;
-  background: rgba(130, 184, 255, 0.08);
+  background: rgba(200, 224, 255, 0.09);
   padding: 2px 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .focus-meta .priority-pill {
@@ -228,7 +251,7 @@ button {
   align-items: center;
   min-height: 20px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.09);
   color: var(--muted);
   padding: 1px 7px;
   font-size: 12px;
@@ -239,7 +262,8 @@ button {
   padding: 2px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgba(0, 0, 0, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .segmented-control--wrap {
@@ -259,7 +283,8 @@ button {
 }
 
 .segmented-control__button--active {
-  background: rgba(130, 184, 255, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(130, 184, 255, 0.13));
   color: var(--accent-strong);
 }
 
@@ -278,7 +303,7 @@ button {
   gap: 10px;
   align-items: start;
   padding: 11px 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgba(255, 255, 255, 0.105);
 }
 
 .task-row:first-child {
@@ -297,7 +322,7 @@ button {
 }
 
 .task-row--current .task-index {
-  background: rgba(130, 184, 255, 0.16);
+  background: rgba(145, 196, 255, 0.18);
   color: var(--accent-strong);
 }
 
@@ -310,6 +335,7 @@ button {
   background: var(--panel-soft);
   color: var(--muted);
   font-size: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .task-copy {
@@ -363,12 +389,13 @@ button {
 
 .inline-edit {
   width: 100%;
-  border: 1px solid rgba(130, 184, 255, 0.42);
+  border: 1px solid rgba(145, 196, 255, 0.46);
   border-radius: 7px;
-  background: rgba(8, 11, 15, 0.72);
+  background: rgba(12, 17, 24, 0.64);
   color: var(--text);
   outline: none;
   padding: 6px 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .inline-edit--title {
@@ -401,8 +428,8 @@ button {
 }
 
 .priority-pill {
-  --priority-bg: rgba(130, 184, 255, 0.08);
-  --priority-line: rgba(130, 184, 255, 0.18);
+  --priority-bg: rgba(145, 196, 255, 0.11);
+  --priority-line: rgba(200, 224, 255, 0.23);
   --priority-text: var(--accent-strong);
   display: inline-flex;
   align-items: center;
@@ -415,6 +442,7 @@ button {
   padding: 2px 8px;
   font-size: 12px;
   line-height: 1.2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 button.priority-pill {
@@ -453,11 +481,17 @@ button.priority-pill {
   display: grid;
   gap: 4px;
   min-width: 92px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: rgba(17, 21, 28, 0.98);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
+    rgba(22, 29, 39, 0.82);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
   padding: 6px;
+  -webkit-backdrop-filter: saturate(1.55) blur(24px);
+  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .priority-menu__item {
@@ -474,7 +508,7 @@ button.priority-pill {
 .priority-menu__item:hover,
 .priority-menu__item--active {
   border-color: var(--line);
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.095);
   color: var(--text);
 }
 
@@ -505,8 +539,12 @@ button.priority-pill {
 .command-form button {
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.055);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.055));
   color: var(--text);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 1px 5px rgba(0, 0, 0, 0.12);
   transition:
     border-color 120ms ease,
     background 120ms ease,
@@ -524,12 +562,14 @@ button.priority-pill {
 .icon-button--quiet {
   border-color: transparent;
   background: transparent;
+  box-shadow: none;
   color: var(--subtle);
 }
 
 .icon-button--active {
-  border-color: rgba(130, 184, 255, 0.38);
-  background: rgba(130, 184, 255, 0.16);
+  border-color: rgba(145, 196, 255, 0.42);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(145, 196, 255, 0.18));
   color: var(--accent-strong);
 }
 
@@ -563,11 +603,17 @@ button.priority-pill {
   grid-template-columns: repeat(2, max-content);
   gap: 6px;
   min-width: 126px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: rgba(17, 21, 28, 0.98);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.36);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
+    rgba(22, 29, 39, 0.82);
+  box-shadow:
+    0 16px 38px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
   padding: 7px;
+  -webkit-backdrop-filter: saturate(1.55) blur(24px);
+  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .postpone-menu button,
@@ -575,7 +621,7 @@ button.priority-pill {
   min-height: 28px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text);
   padding: 0 8px;
   font-size: 12px;
@@ -592,7 +638,8 @@ button.priority-pill {
 .primary-button:hover,
 .command-form button:hover {
   border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.085);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(145, 196, 255, 0.09));
 }
 
 .add-toggle {
@@ -633,8 +680,9 @@ button.priority-pill {
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(130, 184, 255, 0.07);
+  background: rgba(145, 196, 255, 0.095);
   padding: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .quick-preview p,
@@ -673,10 +721,11 @@ button.priority-pill {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgba(8, 11, 15, 0.62);
+  background: rgba(12, 17, 24, 0.62);
   color: var(--text);
   padding: 7px 9px;
   outline: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .task-form input:focus,
@@ -685,19 +734,22 @@ button.priority-pill {
 .import-panel textarea:focus,
 .preview-row input:focus,
 .preview-row select:focus {
-  border-color: rgba(130, 184, 255, 0.5);
-  box-shadow: 0 0 0 3px rgba(130, 184, 255, 0.1);
+  border-color: rgba(145, 196, 255, 0.54);
+  box-shadow:
+    0 0 0 3px rgba(145, 196, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .primary-button {
   min-height: 34px;
   padding: 0 11px;
-  background: rgba(130, 184, 255, 0.15);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(145, 196, 255, 0.18));
   color: var(--accent-strong);
 }
 
 .panel-section--command {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .history-list,
@@ -794,7 +846,7 @@ button.priority-pill {
 }
 
 .panel-section--settings {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .settings-panel {
@@ -842,11 +894,17 @@ button.priority-pill {
   display: grid;
   min-width: 132px;
   gap: 4px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: rgba(24, 31, 42, 0.98);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
+    rgba(24, 31, 42, 0.86);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
   padding: 6px;
+  -webkit-backdrop-filter: saturate(1.55) blur(24px);
+  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .settings-submenu button {
@@ -860,7 +918,7 @@ button.priority-pill {
 }
 
 .settings-submenu button:hover {
-  background: rgba(255, 255, 255, 0.075);
+  background: rgba(255, 255, 255, 0.095);
 }
 
 .sync-form {
@@ -879,11 +937,12 @@ button.priority-pill {
   min-height: 34px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.055);
+  background: rgba(12, 17, 24, 0.56);
   color: var(--text);
   padding: 0 10px;
   outline: none;
   font-size: 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .settings-input:focus {
@@ -895,7 +954,7 @@ button.priority-pill {
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: rgba(0, 0, 0, 0.16);
+  background: rgba(0, 0, 0, 0.18);
   color: var(--subtle);
   padding: 7px 8px;
   overflow-wrap: anywhere;
@@ -954,7 +1013,8 @@ button.priority-pill {
   inset: 0;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
   transition:
     border-color 140ms ease,
     background 140ms ease;
@@ -975,8 +1035,8 @@ button.priority-pill {
 }
 
 .switch input:checked + span {
-  border-color: rgba(130, 184, 255, 0.45);
-  background: rgba(130, 184, 255, 0.2);
+  border-color: rgba(145, 196, 255, 0.48);
+  background: rgba(145, 196, 255, 0.2);
 }
 
 .switch input:checked + span::after {
