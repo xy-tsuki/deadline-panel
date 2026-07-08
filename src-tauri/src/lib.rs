@@ -561,6 +561,7 @@ fn show_panel_context_menu(app: AppHandle) -> Result<(), String> {
     window.popup_menu(&menu).map_err(|error| error.to_string())
 }
 
+#[cfg(windows)]
 #[tauri::command]
 fn start_panel_drag(app: AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window("main") else {
@@ -604,6 +605,32 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
         );
     });
 
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn start_panel_drag(app: AppHandle) -> Result<(), String> {
+    finish_panel_drag_stub(&app)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+#[tauri::command]
+fn start_panel_drag(app: AppHandle) -> Result<(), String> {
+    finish_panel_drag_stub(&app)
+}
+
+#[cfg(not(windows))]
+fn finish_panel_drag_stub(app: &AppHandle) -> Result<(), String> {
+    if let Some(panel_window) = app.get_webview_window("panel") {
+        let _ = panel_window.hide();
+        let _ = panel_window.set_focusable(false);
+    }
+
+    let state = app.state::<AppState>();
+    let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+    panel.dragging = false;
+    panel.expanded = false;
     Ok(())
 }
 
@@ -1236,7 +1263,6 @@ fn position_expanded_panel(
         return Ok(());
     };
     let scale = strip_window.scale_factor()?;
-    let width = (PANEL_WIDTH * scale).round() as i32;
     let max_height = expanded_panel_height(strip_window)?;
     let min_height = min_panel_height(strip_window)?;
     let collapsed_height = collapsed_strip_height(strip_window)?;
@@ -1265,6 +1291,7 @@ fn position_expanded_panel(
 
     #[cfg(windows)]
     {
+        let width = (PANEL_WIDTH * scale).round() as i32;
         let flags = SWP_NOZORDER | SWP_NOACTIVATE;
         let hwnd = panel_window.hwnd()?;
         unsafe { SetWindowPos(hwnd, None, anchor_x, y, width, height, flags)? };
@@ -1553,7 +1580,12 @@ fn point_in_rect(point: POINT, rect: RECT) -> bool {
     point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn foreground_window_is_fullscreen(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(false)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn foreground_window_is_fullscreen(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     Ok(false)
 }
@@ -1582,7 +1614,12 @@ fn cursor_is_in_panel_trigger(app: &AppHandle) -> Result<bool, Box<dyn std::erro
         && !foreground_shell_overlay_covers_cursor(cursor))
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn cursor_is_in_panel_trigger(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(false)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn cursor_is_in_panel_trigger(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     Ok(false)
 }
@@ -1660,11 +1697,23 @@ fn cursor_in_window_rect(
         && cursor.y <= position.y + size.height as i32)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
 fn get_panel_pointer_state(
     _app: &AppHandle,
 ) -> Result<PanelPointerState, Box<dyn std::error::Error>> {
-    Ok(PanelPointerState {
+    Ok(default_panel_pointer_state())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn get_panel_pointer_state(
+    _app: &AppHandle,
+) -> Result<PanelPointerState, Box<dyn std::error::Error>> {
+    Ok(default_panel_pointer_state())
+}
+
+#[cfg(not(windows))]
+fn default_panel_pointer_state() -> PanelPointerState {
+    PanelPointerState {
         in_trigger: false,
         in_window: false,
         expand_direction: "up",
@@ -1674,7 +1723,7 @@ fn get_panel_pointer_state(
         cursor_y: 0,
         window_x: 0,
         window_y: 0,
-    })
+    }
 }
 
 #[cfg(windows)]
