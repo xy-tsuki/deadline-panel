@@ -39,6 +39,8 @@ const PANEL_MARGIN: i32 = 18;
 const PANEL_POSITION_SETTING_KEY: &str = "panel_position";
 const PANEL_ANCHOR_POSITION_SETTING_KEY: &str = "panel_anchor_position_v2";
 const SEED_TASKS_V2_SETTING_KEY: &str = "seed_tasks_v2";
+const LONG_RUNTIME_RESTART_AFTER: Duration = Duration::from_secs(10 * 60 * 60);
+const LONG_RUNTIME_RESTART_RETRY: Duration = Duration::from_secs(5 * 60);
 #[cfg(windows)]
 const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(windows)]
@@ -670,6 +672,7 @@ pub fn run() {
             ))?;
             setup_tray(app)?;
             show_panel_collapsed(app.handle(), false, false).map_err(|error| error.to_string())?;
+            start_long_runtime_watchdog(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -941,6 +944,37 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
 
 fn restart_app(app: &AppHandle) {
     app.restart();
+}
+
+fn start_long_runtime_watchdog(app: AppHandle) {
+    thread::spawn(move || {
+        thread::sleep(LONG_RUNTIME_RESTART_AFTER);
+        loop {
+            if should_restart_after_long_runtime(&app) {
+                app.restart();
+            }
+            thread::sleep(LONG_RUNTIME_RESTART_RETRY);
+        }
+    });
+}
+
+fn should_restart_after_long_runtime(app: &AppHandle) -> bool {
+    let is_expanded = app
+        .try_state::<AppState>()
+        .and_then(|state| state.panel.lock().ok().map(|panel| panel.expanded))
+        .unwrap_or(false);
+    if is_expanded {
+        return false;
+    }
+
+    #[cfg(windows)]
+    if let Ok(pointer) = get_panel_pointer_state(app) {
+        if pointer.in_window || pointer.left_down || pointer.right_down {
+            return false;
+        }
+    }
+
+    true
 }
 
 #[cfg(windows)]
