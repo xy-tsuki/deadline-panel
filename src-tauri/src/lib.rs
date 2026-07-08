@@ -870,7 +870,7 @@ fn position_main_window(
 }
 
 fn panel_window_shadow_enabled() -> bool {
-    cfg!(target_os = "macos")
+    false
 }
 
 fn apply_panel_workspace_behavior(
