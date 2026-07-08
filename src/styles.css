@@ -9,6 +9,10 @@
   --glass-wash: rgba(255, 255, 255, 0.085);
   --glass-tint: rgba(142, 184, 232, 0.1);
   --glass-depth: rgba(8, 12, 18, 0.24);
+  --control-glass: rgba(255, 255, 255, 0.075);
+  --control-glass-strong: rgba(145, 196, 255, 0.16);
+  --control-line: rgba(255, 255, 255, 0.2);
+  --control-highlight: rgba(255, 255, 255, 0.14);
   --line: rgba(255, 255, 255, 0.18);
   --line-strong: rgba(255, 255, 255, 0.28);
   --text: #f4f7fb;
@@ -99,10 +103,10 @@ button {
   gap: 9px;
   align-items: center;
   min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(18, 24, 34, 0.74);
+  background: rgba(18, 24, 34, 0.44);
   color: var(--muted);
   cursor: default;
   font-size: 13px;
@@ -137,7 +141,7 @@ button {
   overflow: hidden auto;
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
-  background: rgba(18, 24, 34, 0.32);
+  background: rgba(18, 24, 34, 0.38);
   opacity: 1;
   transform: translateX(0) translateY(0);
   visibility: visible;
@@ -244,11 +248,13 @@ button {
 
 .segmented-control {
   display: inline-flex;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  padding: 3px;
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.06);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 var(--control-highlight),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.045);
 }
 
 .segmented-control--wrap {
@@ -258,19 +264,21 @@ button {
 }
 
 .segmented-control__button {
-  min-height: 24px;
+  min-height: 26px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 999px;
   background: transparent;
   color: var(--subtle);
-  padding: 0 7px;
+  padding: 0 9px;
   font-size: 11px;
 }
 
 .segmented-control__button--active {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(130, 184, 255, 0.13));
+  background: var(--control-glass-strong);
   color: var(--accent-strong);
+  box-shadow:
+    inset 0 1px 0 var(--control-highlight),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.055);
 }
 
 .task-list {
@@ -516,14 +524,13 @@ button.priority-pill {
 .add-toggle,
 .primary-button,
 .command-form button {
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.055));
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  background: var(--control-glass);
   color: var(--text);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    0 1px 5px rgba(0, 0, 0, 0.12);
+    inset 0 1px 0 var(--control-highlight),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.045);
   transition:
     border-color 120ms ease,
     background 120ms ease,
@@ -547,8 +554,7 @@ button.priority-pill {
 
 .icon-button--active {
   border-color: rgba(145, 196, 255, 0.42);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(145, 196, 255, 0.18));
+  background: rgba(145, 196, 255, 0.2);
   color: var(--accent-strong);
 }
 
@@ -564,7 +570,7 @@ button.priority-pill {
   gap: 5px;
   align-items: center;
   min-height: 28px;
-  padding: 0 8px;
+  padding: 0 10px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -592,9 +598,9 @@ button.priority-pill {
 .postpone-menu button,
 .postpone-menu input {
   min-height: 28px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--control-line);
+  border-radius: 999px;
+  background: var(--control-glass);
   color: var(--text);
   padding: 0 8px;
   font-size: 12px;
@@ -611,8 +617,7 @@ button.priority-pill {
 .primary-button:hover,
 .command-form button:hover {
   border-color: var(--line-strong);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(145, 196, 255, 0.09));
+  background: rgba(145, 196, 255, 0.12);
 }
 
 .add-toggle {
@@ -620,7 +625,7 @@ button.priority-pill {
   gap: 8px;
   align-items: center;
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 12px;
   color: var(--accent-strong);
   font-size: 13px;
 }
@@ -692,9 +697,9 @@ button.priority-pill {
 .preview-row select {
   width: 100%;
   min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: rgba(12, 17, 24, 0.62);
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: rgba(12, 17, 24, 0.54);
   color: var(--text);
   padding: 7px 9px;
   outline: none;
@@ -715,9 +720,8 @@ button.priority-pill {
 
 .primary-button {
   min-height: 34px;
-  padding: 0 11px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(145, 196, 255, 0.18));
+  padding: 0 13px;
+  background: rgba(145, 196, 255, 0.18);
   color: var(--accent-strong);
 }
 
@@ -876,11 +880,11 @@ button.priority-pill {
 
 .settings-submenu button {
   border: 0;
-  border-radius: 6px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  padding: 7px 8px;
+  padding: 7px 10px;
   text-align: left;
 }
 
@@ -902,9 +906,9 @@ button.priority-pill {
 .settings-input {
   width: 100%;
   min-height: 34px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: rgba(12, 17, 24, 0.56);
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
+  background: rgba(12, 17, 24, 0.54);
   color: var(--text);
   padding: 0 10px;
   outline: none;
@@ -919,8 +923,8 @@ button.priority-pill {
 
 .data-path {
   margin: 0;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  border: 1px solid var(--control-line);
+  border-radius: 10px;
   background: rgba(0, 0, 0, 0.18);
   color: var(--subtle);
   padding: 7px 8px;
@@ -965,8 +969,8 @@ button.priority-pill {
 .switch {
   position: relative;
   flex: 0 0 auto;
-  width: 42px;
-  height: 24px;
+  width: 46px;
+  height: 26px;
 }
 
 .switch input {
@@ -978,10 +982,12 @@ button.priority-pill {
 .switch span {
   position: absolute;
   inset: 0;
-  border: 1px solid var(--line);
+  border: 1px solid var(--control-line);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  background: var(--control-glass);
+  box-shadow:
+    inset 0 1px 0 var(--control-highlight),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.045);
   transition:
     border-color 140ms ease,
     background 140ms ease;
@@ -992,8 +998,8 @@ button.priority-pill {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--muted);
   transition:
@@ -1007,7 +1013,7 @@ button.priority-pill {
 }
 
 .switch input:checked + span::after {
-  transform: translateX(18px);
+  transform: translateX(20px);
   background: var(--accent-strong);
 }
 
