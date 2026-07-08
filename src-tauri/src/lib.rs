@@ -486,6 +486,11 @@ fn panel_pointer_state(app: AppHandle) -> Result<PanelPointerState, String> {
 }
 
 #[tauri::command]
+fn panel_hover_polling_enabled() -> bool {
+    cfg!(target_os = "macos")
+}
+
+#[tauri::command]
 fn set_panel_accepts_input(accepts_input: bool, app: AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window("main") else {
         return Ok(());
@@ -726,6 +731,7 @@ pub fn run() {
             is_foreground_window_fullscreen,
             cursor_in_panel_trigger,
             panel_pointer_state,
+            panel_hover_polling_enabled,
             set_panel_accepts_input,
             move_panel_window,
             remember_panel_position,

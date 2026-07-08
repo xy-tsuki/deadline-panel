@@ -84,6 +84,14 @@ export async function getPanelPointerState(): Promise<PanelPointerState | null> 
   return invoke<PanelPointerState>("panel_pointer_state");
 }
 
+export async function isPanelHoverPollingEnabled(): Promise<boolean> {
+  if (!isTauriRuntime()) {
+    return false;
+  }
+
+  return invoke<boolean>("panel_hover_polling_enabled");
+}
+
 export async function setPanelAcceptsInput(acceptsInput: boolean): Promise<void> {
   if (!isTauriRuntime()) {
     return;

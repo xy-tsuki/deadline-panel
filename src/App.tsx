@@ -36,6 +36,7 @@ import {
   hidePanelTemporarily,
   hidePanelForMinutes,
   isForegroundWindowFullscreen,
+  isPanelHoverPollingEnabled,
   isTauriRuntime,
   openDataDir,
   resetPanelPosition,
@@ -59,6 +60,7 @@ const COLLAPSE_DELAY_MS = 220;
 const COLLAPSE_ANIMATION_MS = 210;
 const FULLSCREEN_CHECK_INTERVAL_MS = 1200;
 const COLLAPSED_HOVER_DWELL_MS = 180;
+const HOVER_POLL_INTERVAL_MS = 80;
 const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/releases/latest";
 const CLOUD_SYNC_START_DELAY_MS = 10_000;
 const CLOUD_SYNC_INTERVAL_MS = 5 * 60 * 1000;
@@ -117,6 +119,7 @@ export function App() {
   const collapseTimerRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
   const collapsedHoverTimerRef = useRef<number | null>(null);
+  const nativeHoverStartedAtRef = useRef<number | null>(null);
   const lastAutoHiddenRef = useRef(false);
   const isDraggingPanelRef = useRef(false);
   const cloudSyncInFlightRef = useRef(false);
@@ -348,6 +351,69 @@ export function App() {
   function handlePanelPointerLeave() {
     scheduleCollapseWhenPointerLeavesWindow();
   }
+
+  useEffect(() => {
+    if (!isTauriRuntime() || isPanelWindow) return;
+
+    let isMounted = true;
+    let isPolling = false;
+    let interval: number | null = null;
+
+    async function pollPointerState() {
+      if (isPolling) return;
+      isPolling = true;
+
+      try {
+        const state = await getPanelPointerState();
+        if (!isMounted || !state) return;
+
+        if (isExpanded) {
+          nativeHoverStartedAtRef.current = null;
+          if (state.inWindow) {
+            clearCollapseTimer();
+          } else if (collapseTimerRef.current === null) {
+            scheduleCollapseWhenPointerLeavesWindow();
+          }
+          return;
+        }
+
+        const dragIsActive = isDraggingPanelRef.current && state.leftDown;
+        if (state.inTrigger && !lastAutoHiddenRef.current && !dragIsActive) {
+          const now = Date.now();
+          nativeHoverStartedAtRef.current ??= now;
+          if (now - nativeHoverStartedAtRef.current >= COLLAPSED_HOVER_DWELL_MS) {
+            nativeHoverStartedAtRef.current = null;
+            void expandPanel();
+          }
+        } else {
+          nativeHoverStartedAtRef.current = null;
+        }
+      } catch {
+        nativeHoverStartedAtRef.current = null;
+      } finally {
+        isPolling = false;
+      }
+    }
+
+    void (async () => {
+      try {
+        if (!(await isPanelHoverPollingEnabled()) || !isMounted) return;
+      } catch {
+        return;
+      }
+
+      void pollPointerState();
+      interval = window.setInterval(() => void pollPointerState(), HOVER_POLL_INTERVAL_MS);
+    })();
+
+    return () => {
+      isMounted = false;
+      nativeHoverStartedAtRef.current = null;
+      if (interval !== null) {
+        window.clearInterval(interval);
+      }
+    };
+  }, [isExpanded, isPanelWindow]);
 
   async function handleHideTemporarily() {
     clearCollapseTimer();
