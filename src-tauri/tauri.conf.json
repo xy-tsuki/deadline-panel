@@ -57,6 +57,9 @@
     "icon": [
       "icons/icon.ico"
     ],
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "windows": {
       "nsis": {
         "languages": ["SimpChinese", "Japanese", "English"],
