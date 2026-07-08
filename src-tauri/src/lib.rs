@@ -400,6 +400,7 @@ fn set_panel_expanded(
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
         apply_panel_workspace_behavior(&panel_window).map_err(|error| error.to_string())?;
+        apply_panel_window_material(&panel_window);
         panel_window
             .set_shadow(panel_window_shadow_enabled())
             .map_err(|error| error.to_string())?;
@@ -851,6 +852,7 @@ fn position_main_window(
     strip_window.set_shadow(panel_window_shadow_enabled())?;
     strip_window.set_skip_taskbar(true)?;
     apply_panel_workspace_behavior(&strip_window)?;
+    apply_panel_window_material(&strip_window);
     let _ = set_strip_bounds_from_saved_or_bottom_right(&strip_window, db)?;
     strip_window.set_focusable(false)?;
     strip_window.set_ignore_cursor_events(false)?;
@@ -859,6 +861,7 @@ fn position_main_window(
         panel_window.set_shadow(panel_window_shadow_enabled())?;
         panel_window.set_skip_taskbar(true)?;
         apply_panel_workspace_behavior(&panel_window)?;
+        apply_panel_window_material(&panel_window);
         panel_window.set_focusable(false)?;
         panel_window.set_ignore_cursor_events(false)?;
         let _ = panel_window.hide();
@@ -879,6 +882,17 @@ fn apply_panel_workspace_behavior(
     }
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+fn apply_panel_window_material(window: &tauri::WebviewWindow) {
+    use window_vibrancy::{apply_liquid_glass, clear_liquid_glass, NSGlassEffectViewStyle};
+
+    let _ = clear_liquid_glass(window);
+    let _ = apply_liquid_glass(window, NSGlassEffectViewStyle::Regular, None, Some(8.0));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_panel_window_material(_: &tauri::WebviewWindow) {}
 
 fn show_panel_collapsed(
     app: &AppHandle,
@@ -906,6 +920,7 @@ fn show_panel_collapsed(
         .set_skip_taskbar(true)
         .map_err(|error| error.to_string())?;
     apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
+    apply_panel_window_material(&strip_window);
     strip_window.show().map_err(|error| error.to_string())?;
     strip_window
         .set_shadow(panel_window_shadow_enabled())
@@ -957,6 +972,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
         apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
+        apply_panel_window_material(&strip_window);
         strip_window.show().map_err(|error| error.to_string())?;
         strip_window
             .set_shadow(panel_window_shadow_enabled())
@@ -978,6 +994,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
         if let Some(panel_window) = panel_window {
             if expanded {
                 apply_panel_workspace_behavior(&panel_window).map_err(|error| error.to_string())?;
+                apply_panel_window_material(&panel_window);
                 let anchor = current_panel_anchor(&strip_window, open_down, expanded)
                     .map_err(|error| error.to_string())?;
                 position_expanded_panel(

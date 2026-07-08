@@ -3,12 +3,12 @@
   --bg: #0f1217;
   --desktop-a: #11151c;
   --desktop-b: #1c222b;
-  --panel: rgba(28, 34, 44, 0.58);
-  --panel-strong: rgba(30, 36, 47, 0.66);
-  --panel-soft: rgba(255, 255, 255, 0.075);
-  --glass-wash: rgba(255, 255, 255, 0.11);
-  --glass-tint: rgba(142, 184, 232, 0.13);
-  --glass-depth: rgba(8, 12, 18, 0.34);
+  --panel: rgba(28, 34, 44, 0.34);
+  --panel-strong: rgba(30, 36, 47, 0.46);
+  --panel-soft: rgba(255, 255, 255, 0.065);
+  --glass-wash: rgba(255, 255, 255, 0.085);
+  --glass-tint: rgba(142, 184, 232, 0.1);
+  --glass-depth: rgba(8, 12, 18, 0.24);
   --line: rgba(255, 255, 255, 0.18);
   --line-strong: rgba(255, 255, 255, 0.28);
   --text: #f4f7fb;
@@ -105,9 +105,9 @@ button {
   padding: 10px 12px;
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.28), transparent 28%),
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.32), transparent 34%),
-    linear-gradient(155deg, rgba(37, 47, 62, 0.56), rgba(17, 22, 30, 0.72));
+    linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 28%),
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.16), transparent 34%),
+    linear-gradient(155deg, rgba(45, 56, 72, 0.2), rgba(16, 21, 29, 0.3));
   color: var(--muted);
   cursor: default;
   font-size: 13px;
@@ -117,8 +117,6 @@ button {
     0 2px 12px rgba(130, 184, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.42),
     inset 0 -1px 0 rgba(255, 255, 255, 0.08);
-  -webkit-backdrop-filter: saturate(1.55) blur(24px);
-  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .desktop-stage input,
@@ -147,17 +145,15 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent 22%),
-    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, 0.18), transparent 28%),
-    radial-gradient(circle at 92% 8%, rgba(145, 196, 255, 0.16), transparent 24%),
-    linear-gradient(155deg, rgba(32, 40, 52, 0.64), rgba(13, 18, 26, 0.76));
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12), transparent 22%),
+    radial-gradient(circle at 10% 0%, rgba(255, 255, 255, 0.1), transparent 28%),
+    radial-gradient(circle at 92% 8%, rgba(145, 196, 255, 0.1), transparent 24%),
+    linear-gradient(155deg, rgba(34, 43, 56, 0.24), rgba(12, 17, 25, 0.34));
   opacity: 1;
   transform: translateX(0) translateY(0);
   visibility: visible;
   pointer-events: auto;
   box-shadow: var(--shadow);
-  -webkit-backdrop-filter: saturate(1.65) blur(30px);
-  backdrop-filter: saturate(1.65) blur(30px);
 }
 
 .panel-section {
@@ -484,14 +480,12 @@ button.priority-pill {
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
-    rgba(22, 29, 39, 0.82);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), transparent 24%),
+    rgba(22, 29, 39, 0.62);
   box-shadow:
     0 16px 38px rgba(0, 0, 0, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.22);
   padding: 6px;
-  -webkit-backdrop-filter: saturate(1.55) blur(24px);
-  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .priority-menu__item {
@@ -606,14 +600,12 @@ button.priority-pill {
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
-    rgba(22, 29, 39, 0.82);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), transparent 24%),
+    rgba(22, 29, 39, 0.62);
   box-shadow:
     0 16px 38px rgba(0, 0, 0, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.22);
   padding: 7px;
-  -webkit-backdrop-filter: saturate(1.55) blur(24px);
-  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .postpone-menu button,
@@ -897,14 +889,12 @@ button.priority-pill {
   border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 8px;
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.17), transparent 24%),
-    rgba(24, 31, 42, 0.86);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.12), transparent 24%),
+    rgba(24, 31, 42, 0.66);
   box-shadow:
     0 14px 32px rgba(0, 0, 0, 0.3),
     inset 0 1px 0 rgba(255, 255, 255, 0.2);
   padding: 6px;
-  -webkit-backdrop-filter: saturate(1.55) blur(24px);
-  backdrop-filter: saturate(1.55) blur(24px);
 }
 
 .settings-submenu button {
