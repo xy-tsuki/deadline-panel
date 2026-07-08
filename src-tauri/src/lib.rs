@@ -1049,9 +1049,6 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .icon_as_template(cfg!(target_os = "macos"))
         .show_menu_on_left_click(cfg!(target_os = "macos"))
-        .on_menu_event(|app, event| {
-            handle_panel_menu_event(app, event.id().as_ref());
-        })
         .build(app)?;
 
     Ok(())
