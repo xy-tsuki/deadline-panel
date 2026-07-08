@@ -798,6 +798,8 @@ pub fn run() {
                     dock_visible: false,
                 }),
             });
+            #[cfg(target_os = "macos")]
+            set_macos_dock_icon_visible(app.handle(), false).map_err(|error| error.to_string())?;
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -852,7 +854,7 @@ fn position_main_window(
     strip_window.set_shadow(panel_window_shadow_enabled())?;
     strip_window.set_skip_taskbar(true)?;
     apply_panel_workspace_behavior(&strip_window)?;
-    apply_panel_window_material(&strip_window);
+    apply_strip_window_material(&strip_window);
     let _ = set_strip_bounds_from_saved_or_bottom_right(&strip_window, db)?;
     strip_window.set_focusable(false)?;
     strip_window.set_ignore_cursor_events(false)?;
@@ -894,6 +896,16 @@ fn apply_panel_window_material(window: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "macos"))]
 fn apply_panel_window_material(_: &tauri::WebviewWindow) {}
 
+#[cfg(target_os = "macos")]
+fn apply_strip_window_material(window: &tauri::WebviewWindow) {
+    use window_vibrancy::clear_liquid_glass;
+
+    let _ = clear_liquid_glass(window);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn apply_strip_window_material(_: &tauri::WebviewWindow) {}
+
 fn show_panel_collapsed(
     app: &AppHandle,
     clear_hidden: bool,
@@ -920,7 +932,7 @@ fn show_panel_collapsed(
         .set_skip_taskbar(true)
         .map_err(|error| error.to_string())?;
     apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
-    apply_panel_window_material(&strip_window);
+    apply_strip_window_material(&strip_window);
     strip_window.show().map_err(|error| error.to_string())?;
     strip_window
         .set_shadow(panel_window_shadow_enabled())
@@ -972,7 +984,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
         apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
-        apply_panel_window_material(&strip_window);
+        apply_strip_window_material(&strip_window);
         strip_window.show().map_err(|error| error.to_string())?;
         strip_window
             .set_shadow(panel_window_shadow_enabled())
@@ -1177,8 +1189,25 @@ fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn set_macos_dock_icon_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
-    app.set_dock_visibility(visible)
-        .map_err(|error| error.to_string())
+    let activation_policy = if visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+
+    if visible {
+        app.set_activation_policy(activation_policy)
+            .map_err(|error| error.to_string())?;
+        app.set_dock_visibility(true)
+            .map_err(|error| error.to_string())?;
+    } else {
+        app.set_dock_visibility(false)
+            .map_err(|error| error.to_string())?;
+        app.set_activation_policy(activation_policy)
+            .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]

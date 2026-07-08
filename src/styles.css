@@ -99,10 +99,10 @@ button {
   gap: 9px;
   align-items: center;
   min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.26);
+  border: 1px solid rgba(255, 255, 255, 0.22);
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(24, 31, 42, 0.28);
+  background: rgba(18, 24, 34, 0.74);
   color: var(--muted);
   cursor: default;
   font-size: 13px;
