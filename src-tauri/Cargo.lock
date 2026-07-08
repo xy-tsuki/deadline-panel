@@ -699,6 +699,7 @@ version = "0.5.1"
 dependencies = [
  "core-foundation",
  "core-graphics",
+ "png 0.17.16",
  "rusqlite",
  "serde",
  "serde_json",

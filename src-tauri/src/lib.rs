@@ -10,7 +10,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
+    ActivationPolicy, AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
 };
 
 #[cfg(target_os = "macos")]
@@ -399,6 +399,7 @@ fn set_panel_expanded(
         panel_window
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
+        apply_panel_workspace_behavior(&panel_window).map_err(|error| error.to_string())?;
         panel_window
             .set_shadow(panel_window_shadow_enabled())
             .map_err(|error| error.to_string())?;
@@ -849,6 +850,7 @@ fn position_main_window(
 
     strip_window.set_shadow(panel_window_shadow_enabled())?;
     strip_window.set_skip_taskbar(true)?;
+    apply_panel_workspace_behavior(&strip_window)?;
     let _ = set_strip_bounds_from_saved_or_bottom_right(&strip_window, db)?;
     strip_window.set_focusable(false)?;
     strip_window.set_ignore_cursor_events(false)?;
@@ -856,6 +858,7 @@ fn position_main_window(
     if let Some(panel_window) = app.get_webview_window("panel") {
         panel_window.set_shadow(panel_window_shadow_enabled())?;
         panel_window.set_skip_taskbar(true)?;
+        apply_panel_workspace_behavior(&panel_window)?;
         panel_window.set_focusable(false)?;
         panel_window.set_ignore_cursor_events(false)?;
         let _ = panel_window.hide();
@@ -865,6 +868,16 @@ fn position_main_window(
 
 fn panel_window_shadow_enabled() -> bool {
     cfg!(target_os = "macos")
+}
+
+fn apply_panel_workspace_behavior(
+    window: &tauri::WebviewWindow,
+) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "macos")]
+    {
+        window.set_visible_on_all_workspaces(true)?;
+    }
+    Ok(())
 }
 
 fn show_panel_collapsed(
@@ -892,6 +905,7 @@ fn show_panel_collapsed(
     strip_window
         .set_skip_taskbar(true)
         .map_err(|error| error.to_string())?;
+    apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
     strip_window.show().map_err(|error| error.to_string())?;
     strip_window
         .set_shadow(panel_window_shadow_enabled())
@@ -942,6 +956,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
         strip_window
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
+        apply_panel_workspace_behavior(&strip_window).map_err(|error| error.to_string())?;
         strip_window.show().map_err(|error| error.to_string())?;
         strip_window
             .set_shadow(panel_window_shadow_enabled())
@@ -962,6 +977,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         if let Some(panel_window) = panel_window {
             if expanded {
+                apply_panel_workspace_behavior(&panel_window).map_err(|error| error.to_string())?;
                 let anchor = current_panel_anchor(&strip_window, open_down, expanded)
                     .map_err(|error| error.to_string())?;
                 position_expanded_panel(
@@ -995,10 +1011,11 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
 
 fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let menu = build_panel_menu(app.handle())?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .unwrap_or_else(|| Image::new(&[], 0, 0));
+    let icon = load_menu_bar_icon().unwrap_or_else(|_| {
+        app.default_window_icon()
+            .cloned()
+            .unwrap_or_else(|| Image::new(&[], 0, 0))
+    });
 
     TrayIconBuilder::with_id("main-tray")
         .tooltip("Deadline Panel")
@@ -1012,6 +1029,33 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
 
     Ok(())
+}
+
+fn load_menu_bar_icon() -> Result<Image<'static>, Box<dyn std::error::Error>> {
+    let bytes = include_bytes!("../icons/menuBarIcon.png");
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info()?;
+    let mut buffer = vec![0; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buffer)?;
+    let pixels = &buffer[..info.buffer_size()];
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => pixels.to_vec(),
+        png::ColorType::Rgb => pixels
+            .chunks_exact(3)
+            .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => pixels
+            .chunks_exact(2)
+            .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
+            .collect(),
+        png::ColorType::Grayscale => pixels
+            .iter()
+            .flat_map(|value| [*value, *value, *value, 255])
+            .collect(),
+        png::ColorType::Indexed => return Err("indexed menu bar icon was not expanded".into()),
+    };
+    Ok(Image::new_owned(rgba, info.width, info.height))
 }
 
 fn refresh_tray_menu(app: &AppHandle) {
@@ -1103,8 +1147,7 @@ fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
         !panel.dock_visible
     };
 
-    app.set_dock_visibility(next_visible)
-        .map_err(|error| error.to_string())?;
+    set_macos_dock_icon_visible(app, next_visible)?;
 
     {
         let state = app.state::<AppState>();
@@ -1113,6 +1156,19 @@ fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
     }
     refresh_tray_menu(app);
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn set_macos_dock_icon_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
+    let policy = if visible {
+        ActivationPolicy::Regular
+    } else {
+        ActivationPolicy::Accessory
+    };
+    app.set_activation_policy(policy)
+        .map_err(|error| error.to_string())?;
+    app.set_dock_visibility(visible)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1289,12 +1345,12 @@ fn resolved_native_language(app: &AppHandle) -> String {
 
     match language.as_str() {
         "zh" | "ja" | "en" => language,
-        _ => system_native_language().to_string(),
+        _ => system_native_language(),
     }
 }
 
 #[cfg(windows)]
-fn system_native_language() -> &'static str {
+fn system_native_language() -> String {
     let lang_id = unsafe { GetUserDefaultUILanguage() };
     let primary_language = lang_id & 0x03ff;
     match primary_language {
@@ -1302,21 +1358,61 @@ fn system_native_language() -> &'static str {
         0x11 => "ja",
         _ => "en",
     }
+    .to_string()
+}
+
+#[cfg(target_os = "macos")]
+fn system_native_language() -> String {
+    let apple_languages = Command::new("defaults")
+        .args(["read", "-g", "AppleLanguages"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
+        .unwrap_or_default();
+
+    macos_language_from_defaults_output(&apple_languages).unwrap_or_else(fallback_native_language)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_language_from_defaults_output(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_matches(',')
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_ascii_lowercase()
+        })
+        .find_map(|locale| normalized_native_language(&locale))
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn system_native_language() -> String {
+    fallback_native_language()
 }
 
 #[cfg(not(windows))]
-fn system_native_language() -> &'static str {
+fn fallback_native_language() -> String {
     let locale = std::env::var("LC_ALL")
         .or_else(|_| std::env::var("LC_MESSAGES"))
         .or_else(|_| std::env::var("LANG"))
         .unwrap_or_default()
         .to_ascii_lowercase();
+    normalized_native_language(&locale).unwrap_or_else(|| "en".to_string())
+}
+
+#[cfg(not(windows))]
+fn normalized_native_language(locale: &str) -> Option<String> {
     if locale.starts_with("zh") {
-        "zh"
+        Some("zh".to_string())
     } else if locale.starts_with("ja") {
-        "ja"
+        Some("ja".to_string())
+    } else if locale.starts_with("en") {
+        Some("en".to_string())
     } else {
-        "en"
+        None
     }
 }
 
