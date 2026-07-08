@@ -13,6 +13,25 @@ use tauri::{
     AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
 };
 
+#[cfg(target_os = "macos")]
+use core_foundation::{
+    base::{CFType, TCFType},
+    dictionary::{CFDictionary, CFDictionaryRef},
+    number::CFNumber,
+    string::CFStringRef,
+};
+#[cfg(target_os = "macos")]
+use core_graphics::{
+    display::CGDisplay,
+    geometry::CGRect,
+    window::{
+        copy_window_info, kCGNullWindowID, kCGWindowBounds, kCGWindowLayer,
+        kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly, kCGWindowOwnerPID,
+    },
+};
+#[cfg(target_os = "macos")]
+use tauri_plugin_autostart::ManagerExt;
+
 #[cfg(windows)]
 use windows::Win32::{
     Foundation::{HWND, POINT, RECT},
@@ -57,6 +76,7 @@ struct PanelState {
     dragging: bool,
     open_down: bool,
     hide_token: u64,
+    dock_visible: bool,
 }
 
 struct NativeMenuLabels {
@@ -66,6 +86,8 @@ struct NativeMenuLabels {
     hide_30: &'static str,
     hide_60: &'static str,
     reposition: &'static str,
+    show_dock: &'static str,
+    hide_dock: &'static str,
     quit: &'static str,
 }
 
@@ -378,7 +400,7 @@ fn set_panel_expanded(
             .set_skip_taskbar(true)
             .map_err(|error| error.to_string())?;
         panel_window
-            .set_shadow(false)
+            .set_shadow(panel_window_shadow_enabled())
             .map_err(|error| error.to_string())?;
         position_expanded_panel(&strip_window, &panel_window, anchor.0, anchor.1, open_down)
             .map_err(|error| error.to_string())?;
@@ -625,7 +647,31 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn start_panel_drag(app: AppHandle) -> Result<(), String> {
-    finish_panel_drag_stub(&app)
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+
+    {
+        let state = app.state::<AppState>();
+        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        if panel.dragging {
+            return Ok(());
+        }
+        panel.dragging = true;
+        panel.expanded = false;
+    }
+    if let Some(panel_window) = app.get_webview_window("panel") {
+        let _ = panel_window.hide();
+        let _ = panel_window.set_focusable(false);
+    }
+
+    window
+        .set_ignore_cursor_events(false)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_focusable(true)
+        .map_err(|error| error.to_string())?;
+    window.start_dragging().map_err(|error| error.to_string())
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -634,7 +680,7 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
     finish_panel_drag_stub(&app)
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn finish_panel_drag_stub(app: &AppHandle) -> Result<(), String> {
     if let Some(panel_window) = app.get_webview_window("panel") {
         let _ = panel_window.hide();
@@ -648,9 +694,54 @@ fn finish_panel_drag_stub(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
-fn finish_panel_drag(_app: AppHandle) -> Result<(), String> {
+#[cfg(target_os = "macos")]
+fn finish_panel_drag_macos(app: &AppHandle) -> Result<(), String> {
+    if let Some(panel_window) = app.get_webview_window("panel") {
+        let _ = panel_window.hide();
+        let _ = panel_window.set_focusable(false);
+    }
+
+    let Some(window) = app.get_webview_window("main") else {
+        let state = app.state::<AppState>();
+        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.dragging = false;
+        panel.expanded = false;
+        return Ok(());
+    };
+
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let open_down = should_expand_panel_down(&window, position.y).unwrap_or(false);
+
+    let state = app.state::<AppState>();
+    if let Ok(db) = state.db.lock() {
+        let _ = set_app_setting_value(
+            &db,
+            PANEL_ANCHOR_POSITION_SETTING_KEY,
+            &format!("{},{}", position.x, position.y),
+        );
+    }
+    if let Ok(mut panel) = state.panel.lock() {
+        panel.dragging = false;
+        panel.open_down = open_down;
+        panel.expanded = false;
+    }
+
+    let _ = window.set_focusable(false);
+    let _ = window.set_ignore_cursor_events(false);
     Ok(())
+}
+
+#[tauri::command]
+fn finish_panel_drag(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        finish_panel_drag_macos(&app)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -659,14 +750,14 @@ fn quit_app(app: AppHandle) {
 }
 
 #[tauri::command]
-fn get_autostart_enabled() -> Result<bool, String> {
-    autostart_enabled().map_err(|error| error.to_string())
+fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    autostart_enabled(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
-    set_autostart_enabled_native(enabled).map_err(|error| error.to_string())?;
-    autostart_enabled().map_err(|error| error.to_string())
+fn set_autostart_enabled(enabled: bool, app: AppHandle) -> Result<bool, String> {
+    set_autostart_enabled_native(&app, enabled).map_err(|error| error.to_string())?;
+    autostart_enabled(&app).map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -702,6 +793,7 @@ pub fn run() {
                     dragging: false,
                     open_down: false,
                     hide_token: 0,
+                    dock_visible: true,
                 }),
             });
             #[cfg(desktop)]
@@ -755,20 +847,24 @@ fn position_main_window(
         return Ok(());
     };
 
-    strip_window.set_shadow(false)?;
+    strip_window.set_shadow(panel_window_shadow_enabled())?;
     strip_window.set_skip_taskbar(true)?;
     let _ = set_strip_bounds_from_saved_or_bottom_right(&strip_window, db)?;
     strip_window.set_focusable(false)?;
     strip_window.set_ignore_cursor_events(false)?;
 
     if let Some(panel_window) = app.get_webview_window("panel") {
-        panel_window.set_shadow(false)?;
+        panel_window.set_shadow(panel_window_shadow_enabled())?;
         panel_window.set_skip_taskbar(true)?;
         panel_window.set_focusable(false)?;
         panel_window.set_ignore_cursor_events(false)?;
         let _ = panel_window.hide();
     }
     Ok(())
+}
+
+fn panel_window_shadow_enabled() -> bool {
+    cfg!(target_os = "macos")
 }
 
 fn show_panel_collapsed(
@@ -798,7 +894,7 @@ fn show_panel_collapsed(
         .map_err(|error| error.to_string())?;
     strip_window.show().map_err(|error| error.to_string())?;
     strip_window
-        .set_shadow(false)
+        .set_shadow(panel_window_shadow_enabled())
         .map_err(|error| error.to_string())?;
     if reset_position {
         set_window_bounds_bottom_right(&strip_window, PANEL_WIDTH, PANEL_COLLAPSED_HEIGHT)
@@ -848,7 +944,7 @@ fn sync_panel_visibility(app: &AppHandle) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
         strip_window.show().map_err(|error| error.to_string())?;
         strip_window
-            .set_shadow(false)
+            .set_shadow(panel_window_shadow_enabled())
             .map_err(|error| error.to_string())?;
         let state = app.state::<AppState>();
         let db = state.db.lock().map_err(|error| error.to_string())?;
@@ -908,7 +1004,8 @@ fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .tooltip("Deadline Panel")
         .icon(icon)
         .menu(&menu)
-        .show_menu_on_left_click(false)
+        .icon_as_template(cfg!(target_os = "macos"))
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| {
             handle_panel_menu_event(app, event.id().as_ref());
         })
@@ -934,19 +1031,33 @@ fn build_panel_menu(app: &AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::W
     let hide_30 = MenuItemBuilder::with_id("hide_30", labels.hide_30).build(app)?;
     let hide_60 = MenuItemBuilder::with_id("hide_60", labels.hide_60).build(app)?;
     let reposition = MenuItemBuilder::with_id("reposition_panel", labels.reposition).build(app)?;
+    #[cfg(target_os = "macos")]
+    let dock = {
+        let dock_visible = app
+            .try_state::<AppState>()
+            .and_then(|state| state.panel.lock().ok().map(|panel| panel.dock_visible))
+            .unwrap_or(true);
+        let label = if dock_visible {
+            labels.hide_dock
+        } else {
+            labels.show_dock
+        };
+        MenuItemBuilder::with_id("toggle_dock_icon", label).build(app)?
+    };
     let restart = MenuItemBuilder::with_id("restart", native_restart_label(app)).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", labels.quit).build(app)?;
-    MenuBuilder::new(app)
+    let mut builder = MenuBuilder::new(app)
         .item(&show)
         .item(&pause)
         .item(&hide_15)
         .item(&hide_30)
         .item(&hide_60)
-        .item(&reposition)
-        .separator()
-        .item(&restart)
-        .item(&quit)
-        .build()
+        .item(&reposition);
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.item(&dock);
+    }
+    builder.separator().item(&restart).item(&quit).build()
 }
 
 fn handle_panel_menu_event(app: &AppHandle, id: &str) {
@@ -975,10 +1086,38 @@ fn handle_panel_menu_event(app: &AppHandle, id: &str) {
         "reposition_panel" => {
             let _ = reset_panel_position(app.clone());
         }
+        "toggle_dock_icon" => {
+            let _ = toggle_dock_icon(app);
+        }
         "restart" => restart_app(app),
         "quit" => app.exit(0),
         _ => {}
     }
+}
+
+#[cfg(target_os = "macos")]
+fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
+    let next_visible = {
+        let state = app.state::<AppState>();
+        let panel = state.panel.lock().map_err(|error| error.to_string())?;
+        !panel.dock_visible
+    };
+
+    app.set_dock_visibility(next_visible)
+        .map_err(|error| error.to_string())?;
+
+    {
+        let state = app.state::<AppState>();
+        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        panel.dock_visible = next_visible;
+    }
+    refresh_tray_menu(app);
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn toggle_dock_icon(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 fn restart_app(app: &AppHandle) {
@@ -998,7 +1137,7 @@ fn normalized_windows_path(path: &std::path::Path) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+fn autostart_enabled(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     let exe_path = current_exe_for_shell()?;
     let output = Command::new("reg")
         .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE])
@@ -1012,13 +1151,21 @@ fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
     Ok(stdout.contains(&exe_path.to_ascii_lowercase()))
 }
 
-#[cfg(not(windows))]
-fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+#[cfg(target_os = "macos")]
+fn autostart_enabled(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(app.autolaunch().is_enabled()?)
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn autostart_enabled(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     Ok(false)
 }
 
 #[cfg(windows)]
-fn set_autostart_enabled_native(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn set_autostart_enabled_native(
+    app: &AppHandle,
+    enabled: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     if enabled {
         let value = format!("\"{}\"", current_exe_for_shell()?);
         let status = Command::new("reg")
@@ -1043,7 +1190,7 @@ fn set_autostart_enabled_native(enabled: bool) -> Result<(), Box<dyn std::error:
             .args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE, "/f"])
             .status()?;
 
-        if !status.success() && autostart_enabled()? {
+        if !status.success() && autostart_enabled(app)? {
             return Err("failed to remove startup registry value".into());
         }
     }
@@ -1051,8 +1198,24 @@ fn set_autostart_enabled_native(enabled: bool) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
-#[cfg(not(windows))]
-fn set_autostart_enabled_native(_enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+#[cfg(target_os = "macos")]
+fn set_autostart_enabled_native(
+    app: &AppHandle,
+    enabled: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if enabled {
+        app.autolaunch().enable()?;
+    } else {
+        app.autolaunch().disable()?;
+    }
+    Ok(())
+}
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn set_autostart_enabled_native(
+    _app: &AppHandle,
+    _enabled: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
@@ -1073,6 +1236,8 @@ fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
             hide_30: "30分隠す",
             hide_60: "60分隠す",
             reposition: "右下に戻す",
+            show_dock: "Dockに表示",
+            hide_dock: "Dockから隠す",
             quit: "終了",
         },
         "en" => NativeMenuLabels {
@@ -1082,6 +1247,8 @@ fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
             hide_30: "Hide 30 min",
             hide_60: "Hide 60 min",
             reposition: "Reset to lower-right",
+            show_dock: "Show in Dock",
+            hide_dock: "Hide from Dock",
             quit: "Quit",
         },
         _ => NativeMenuLabels {
@@ -1091,6 +1258,8 @@ fn native_menu_labels(app: &AppHandle) -> NativeMenuLabels {
             hide_30: "隐藏 30 分钟",
             hide_60: "隐藏 60 分钟",
             reposition: "重新贴到右下角",
+            show_dock: "在程序坞显示",
+            hide_dock: "从程序坞隐藏",
             quit: "退出",
         },
     }
@@ -1596,8 +1765,126 @@ fn point_in_rect(point: POINT, rect: RECT) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn foreground_window_is_fullscreen(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+fn foreground_window_is_fullscreen(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+    let Some(window_info) = copy_window_info(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID,
+    ) else {
+        return Ok(false);
+    };
+
+    let display_bounds = macos_display_bounds();
+    if display_bounds.is_empty() {
+        return Ok(false);
+    }
+
+    let current_pid = std::process::id() as i32;
+    let own_window_rects = macos_own_window_rects(app);
+
+    for value in window_info.get_all_values() {
+        let dict: CFDictionary<*const std::ffi::c_void, CFType> =
+            unsafe { TCFType::wrap_under_get_rule(value as CFDictionaryRef) };
+        let layer = macos_cf_number_i32(&dict, unsafe { kCGWindowLayer }).unwrap_or(0);
+        if layer != 0 {
+            continue;
+        }
+
+        let owner_pid = macos_cf_number_i32(&dict, unsafe { kCGWindowOwnerPID }).unwrap_or_default();
+        if owner_pid == current_pid {
+            continue;
+        }
+
+        let Some(rect) = macos_cf_rect(&dict, unsafe { kCGWindowBounds }) else {
+            continue;
+        };
+        if macos_rect_is_too_small_for_foreground(rect)
+            || macos_rect_matches_any(rect, &own_window_rects)
+        {
+            continue;
+        }
+
+        return Ok(macos_rect_matches_any_display(rect, &display_bounds));
+    }
+
     Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_display_bounds() -> Vec<CGRect> {
+    CGDisplay::active_displays()
+        .map(|displays| {
+            displays
+                .into_iter()
+                .map(|display_id| CGDisplay::new(display_id).bounds())
+                .collect()
+        })
+        .unwrap_or_else(|_| vec![CGDisplay::main().bounds()])
+}
+
+#[cfg(target_os = "macos")]
+fn macos_own_window_rects(app: &AppHandle) -> Vec<CGRect> {
+    ["main", "panel"]
+        .iter()
+        .filter_map(|label| app.get_webview_window(label))
+        .filter_map(|window| webview_window_rect(&window).ok())
+        .map(|rect| {
+            CGRect::new(
+                &core_graphics::geometry::CGPoint::new(rect.left, rect.top),
+                &core_graphics::geometry::CGSize::new(
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                ),
+            )
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cf_number_i32(
+    dict: &CFDictionary<*const std::ffi::c_void, CFType>,
+    key: CFStringRef,
+) -> Option<i32> {
+    dict.find(key as *const std::ffi::c_void)
+        .and_then(|value| value.downcast::<CFNumber>())
+        .and_then(|value| value.to_i32())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_cf_rect(
+    dict: &CFDictionary<*const std::ffi::c_void, CFType>,
+    key: CFStringRef,
+) -> Option<CGRect> {
+    dict.find(key as *const std::ffi::c_void)
+        .and_then(|value| value.downcast::<CFDictionary>())
+        .and_then(|value| CGRect::from_dict_representation(&value))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_rect_matches_any_display(rect: CGRect, displays: &[CGRect]) -> bool {
+    displays
+        .iter()
+        .any(|display| macos_rect_covers_rect(rect, *display, 2.0))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_rect_matches_any(rect: CGRect, others: &[CGRect]) -> bool {
+    others.iter().any(|other| {
+        macos_rect_covers_rect(rect, *other, 2.0)
+            && macos_rect_covers_rect(*other, rect, 2.0)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_rect_covers_rect(rect: CGRect, target: CGRect, tolerance: f64) -> bool {
+    rect.origin.x <= target.origin.x + tolerance
+        && rect.origin.y <= target.origin.y + tolerance
+        && rect.origin.x + rect.size.width >= target.origin.x + target.size.width - tolerance
+        && rect.origin.y + rect.size.height >= target.origin.y + target.size.height - tolerance
+}
+
+#[cfg(target_os = "macos")]
+fn macos_rect_is_too_small_for_foreground(rect: CGRect) -> bool {
+    rect.size.width < 80.0 || rect.size.height < 80.0
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -1751,16 +2038,16 @@ fn macos_panel_pointer_state(
 
     let cursor = strip_window.cursor_position()?;
     let strip_rect = webview_window_rect(&strip_window)?;
-    let (open_down, expanded) = app
+    let (open_down, expanded, dragging) = app
         .try_state::<AppState>()
         .and_then(|state| {
             state
                 .panel
                 .lock()
                 .ok()
-                .map(|panel| (panel.open_down, panel.expanded))
+                .map(|panel| (panel.open_down, panel.expanded, panel.dragging))
         })
-        .unwrap_or((false, false));
+        .unwrap_or((false, false, false));
     let in_strip = strip_rect.contains(cursor.x, cursor.y);
     let in_panel_or_bridge = if expanded {
         app.get_webview_window("panel")
@@ -1777,7 +2064,7 @@ fn macos_panel_pointer_state(
         in_trigger: in_strip,
         in_window: in_strip || in_panel_or_bridge,
         expand_direction: if open_down { "down" } else { "up" },
-        left_down: false,
+        left_down: dragging,
         right_down: false,
         cursor_x: cursor.x.round() as i32,
         cursor_y: cursor.y.round() as i32,

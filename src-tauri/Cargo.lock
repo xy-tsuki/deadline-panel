@@ -697,6 +697,8 @@ dependencies = [
 name = "deadline-panel"
 version = "0.5.1"
 dependencies = [
+ "core-foundation",
+ "core-graphics",
  "rusqlite",
  "serde",
  "serde_json",

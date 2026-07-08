@@ -44,6 +44,7 @@ import {
   setPanelAutoHidden,
   setPanelExpanded as setNativePanelExpanded,
   showPanelContextMenu,
+  finishPanelDrag,
   startPanelDrag
 } from "./runtime/tauri";
 import {
@@ -445,6 +446,7 @@ export function App() {
       isDraggingPanelRef.current = false;
       window.removeEventListener("pointerup", markDragDone);
       window.removeEventListener("mouseup", markDragDone);
+      void finishPanelDrag();
     };
     window.addEventListener("pointerup", markDragDone, { once: true });
     window.addEventListener("mouseup", markDragDone, { once: true });
