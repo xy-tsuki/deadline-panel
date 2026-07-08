@@ -1187,7 +1187,17 @@ fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
 #[cfg(target_os = "macos")]
 fn set_macos_dock_icon_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
     app.set_dock_visibility(visible)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    if !visible {
+        let app = app.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(1200));
+            let _ = app.set_dock_visibility(false);
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
