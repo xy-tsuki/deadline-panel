@@ -114,6 +114,15 @@ struct PanelExpandResult {
     direction: &'static str,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+struct WindowRect {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+
 #[tauri::command]
 fn list_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<DeadlineTask>, String> {
     let db = state.db.lock().map_err(|error| error.to_string())?;
@@ -1615,8 +1624,8 @@ fn cursor_is_in_panel_trigger(app: &AppHandle) -> Result<bool, Box<dyn std::erro
 }
 
 #[cfg(target_os = "macos")]
-fn cursor_is_in_panel_trigger(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
-    Ok(false)
+fn cursor_is_in_panel_trigger(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(macos_panel_pointer_state(app)?.in_trigger)
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -1699,9 +1708,9 @@ fn cursor_in_window_rect(
 
 #[cfg(target_os = "macos")]
 fn get_panel_pointer_state(
-    _app: &AppHandle,
+    app: &AppHandle,
 ) -> Result<PanelPointerState, Box<dyn std::error::Error>> {
-    Ok(default_panel_pointer_state())
+    macos_panel_pointer_state(app)
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -1723,6 +1732,96 @@ fn default_panel_pointer_state() -> PanelPointerState {
         cursor_y: 0,
         window_x: 0,
         window_y: 0,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_panel_pointer_state(
+    app: &AppHandle,
+) -> Result<PanelPointerState, Box<dyn std::error::Error>> {
+    let Some(strip_window) = app.get_webview_window("main") else {
+        return Ok(default_panel_pointer_state());
+    };
+
+    let cursor = strip_window.cursor_position()?;
+    let strip_rect = webview_window_rect(&strip_window)?;
+    let (open_down, expanded) = app
+        .try_state::<AppState>()
+        .and_then(|state| {
+            state
+                .panel
+                .lock()
+                .ok()
+                .map(|panel| (panel.open_down, panel.expanded))
+        })
+        .unwrap_or((false, false));
+    let in_strip = strip_rect.contains(cursor.x, cursor.y);
+    let in_panel_or_bridge = if expanded {
+        app.get_webview_window("panel")
+            .and_then(|panel_window| webview_window_rect(&panel_window).ok())
+            .is_some_and(|panel_rect| {
+                panel_rect.contains(cursor.x, cursor.y)
+                    || bridge_between_windows_contains(strip_rect, panel_rect, cursor.x, cursor.y)
+            })
+    } else {
+        false
+    };
+
+    Ok(PanelPointerState {
+        in_trigger: in_strip,
+        in_window: in_strip || in_panel_or_bridge,
+        expand_direction: if open_down { "down" } else { "up" },
+        left_down: false,
+        right_down: false,
+        cursor_x: cursor.x.round() as i32,
+        cursor_y: cursor.y.round() as i32,
+        window_x: strip_rect.left.round() as i32,
+        window_y: strip_rect.top.round() as i32,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn webview_window_rect(
+    window: &tauri::WebviewWindow,
+) -> Result<WindowRect, Box<dyn std::error::Error>> {
+    let position = window.outer_position()?;
+    let size = window.outer_size()?;
+    Ok(WindowRect {
+        left: position.x as f64,
+        top: position.y as f64,
+        right: position.x as f64 + size.width as f64,
+        bottom: position.y as f64 + size.height as f64,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn bridge_between_windows_contains(
+    strip: WindowRect,
+    panel: WindowRect,
+    cursor_x: f64,
+    cursor_y: f64,
+) -> bool {
+    let left = strip.left.max(panel.left);
+    let right = strip.right.min(panel.right);
+    if left > right || cursor_x < left || cursor_x > right {
+        return false;
+    }
+
+    let (top, bottom) = if panel.top >= strip.bottom {
+        (strip.bottom, panel.top)
+    } else if strip.top >= panel.bottom {
+        (panel.bottom, strip.top)
+    } else {
+        (strip.top.max(panel.top), strip.bottom.min(panel.bottom))
+    };
+
+    cursor_y >= top && cursor_y <= bottom
+}
+
+#[cfg(target_os = "macos")]
+impl WindowRect {
+    fn contains(self, x: f64, y: f64) -> bool {
+        x >= self.left && x <= self.right && y >= self.top && y <= self.bottom
     }
 }
 
