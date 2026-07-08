@@ -10,7 +10,7 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    ActivationPolicy, AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
 };
 
 #[cfg(target_os = "macos")]
@@ -802,7 +802,6 @@ pub fn run() {
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
             ))?;
-            apply_initial_dock_policy(app.handle())?;
             setup_tray(app)?;
             show_panel_collapsed(app.handle(), false, false).map_err(|error| error.to_string())?;
             Ok(())
@@ -869,14 +868,6 @@ fn position_main_window(
 
 fn panel_window_shadow_enabled() -> bool {
     cfg!(target_os = "macos")
-}
-
-fn apply_initial_dock_policy(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "macos")]
-    {
-        app.set_activation_policy(ActivationPolicy::Accessory)?;
-    }
-    Ok(())
 }
 
 fn apply_panel_workspace_behavior(
@@ -1169,15 +1160,8 @@ fn toggle_dock_icon(app: &AppHandle) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn set_macos_dock_icon_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
-    if visible {
-        app.set_activation_policy(ActivationPolicy::Regular)
-            .map_err(|error| error.to_string())?;
-        app.set_dock_visibility(true)
-            .map_err(|error| error.to_string())
-    } else {
-        app.set_activation_policy(ActivationPolicy::Accessory)
-            .map_err(|error| error.to_string())
-    }
+    app.set_dock_visibility(visible)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "macos"))]
