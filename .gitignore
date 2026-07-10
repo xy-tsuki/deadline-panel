@@ -1,7 +1,12 @@
 node_modules/
+.pnpm-store/
 dist/
 dist-ssr/
 target/
+crates/**/target/
+macos-native/.build/
+macos-native/**/.build/
+macos-native/**/.swiftpm/
 src-tauri/target/
 src-tauri/gen/
 src-tauri/updater.key
