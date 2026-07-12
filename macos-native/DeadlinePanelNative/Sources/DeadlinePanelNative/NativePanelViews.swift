@@ -64,9 +64,6 @@ struct CollapsedStripView: View {
             PanelContextMenu(onCommand: onCommand)
         }
         .nativePreferredColorScheme(appearanceMode)
-        .task {
-            viewModel.load()
-        }
     }
 
     private var title: String {

@@ -86,9 +86,6 @@ struct ContentView: View {
                 }
             }
         }
-        .task {
-            viewModel.load()
-        }
         .nativePreferredColorScheme(appearanceMode)
     }
 

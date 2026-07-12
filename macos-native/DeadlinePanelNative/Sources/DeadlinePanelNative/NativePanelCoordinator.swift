@@ -78,7 +78,6 @@ final class NativePanelCoordinator {
         temporaryHideTimer?.invalidate()
         temporaryHideTimer = nil
         cancelScheduledCollapse()
-        viewModel.load()
         positionCollapsedPanel()
         collapsedPanel.orderFrontRegardless()
         expandedPanel.orderOut(nil)

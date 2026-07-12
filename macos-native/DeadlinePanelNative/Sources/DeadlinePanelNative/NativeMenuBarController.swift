@@ -215,7 +215,6 @@ final class NativeMenuBarController: NSObject {
     }
 
     @objc private func scheduleNotifications() {
-        viewModel.load()
         notificationController.schedule(deadlines: viewModel.deadlines)
     }
 

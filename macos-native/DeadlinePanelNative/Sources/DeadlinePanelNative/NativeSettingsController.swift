@@ -76,7 +76,6 @@ final class NativeSettingsController {
             onResetPosition: onResetPosition,
             onHideMinutes: onHideMinutes,
             onScheduleNotifications: { [viewModel, notificationController] in
-                viewModel.load()
                 notificationController.schedule(deadlines: viewModel.deadlines)
             },
             onImportJSON: { [weak self] in self?.fileController.importJSON() },
