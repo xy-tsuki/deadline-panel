@@ -8,37 +8,86 @@ final class NativeFullscreenMonitor {
     private weak var panelCoordinator: NativePanelCoordinator?
     private var timer: Timer?
     private var defaultsObserver: NSObjectProtocol?
+    private var eventObservers: [(NotificationCenter, NSObjectProtocol)] = []
 
     init(panelCoordinator: NativePanelCoordinator) {
         self.panelCoordinator = panelCoordinator
     }
 
     func start() {
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.poll()
-            }
-        }
+        stop()
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                self?.poll()
+                self?.updateMonitoringState()
+            }
+        }
+        observeFullscreenTriggers()
+        updateMonitoringState()
+    }
+
+    func stop() {
+        stopTimer()
+        if let defaultsObserver {
+            NotificationCenter.default.removeObserver(defaultsObserver)
+            self.defaultsObserver = nil
+        }
+        for (center, observer) in eventObservers {
+            center.removeObserver(observer)
+        }
+        eventObservers.removeAll()
+    }
+
+    private func updateMonitoringState() {
+        guard isEnabled else {
+            stopTimer()
+            panelCoordinator?.setAutoHidden(false)
+            return
+        }
+
+        if timer == nil {
+            timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    self?.poll()
+                }
             }
         }
         poll()
     }
 
-    func stop() {
+    private func stopTimer() {
         timer?.invalidate()
         timer = nil
-        if let defaultsObserver {
-            NotificationCenter.default.removeObserver(defaultsObserver)
-            self.defaultsObserver = nil
+    }
+
+    private func observeFullscreenTriggers() {
+        observe(
+            center: NSWorkspace.shared.notificationCenter,
+            name: NSWorkspace.didActivateApplicationNotification
+        )
+        observe(
+            center: NSWorkspace.shared.notificationCenter,
+            name: NSWorkspace.activeSpaceDidChangeNotification
+        )
+        observe(
+            center: NotificationCenter.default,
+            name: NSApplication.didChangeScreenParametersNotification
+        )
+    }
+
+    private func observe(center: NotificationCenter, name: Notification.Name) {
+        let observer = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard self?.isEnabled == true else {
+                    return
+                }
+                self?.poll()
+            }
         }
+        eventObservers.append((center, observer))
     }
 
     private func poll() {
