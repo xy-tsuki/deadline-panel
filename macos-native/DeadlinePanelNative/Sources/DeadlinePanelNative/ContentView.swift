@@ -48,6 +48,7 @@ struct ContentView: View {
                         )
                         RecentDeadlineSection(
                             viewModel: viewModel,
+                            focusLimitState: viewModel.focusLimitState,
                             onUpdate: { task, title, dueAt, notes in
                                 viewModel.updateManual(task: task, title: title, dueAt: dueAt, priority: task.priority, notes: notes)
                             },
@@ -80,7 +81,10 @@ struct ContentView: View {
                             },
                             onControlInteractionChanged: onControlInteractionChanged
                         )
-                        footer
+                        PanelFooter(
+                            viewModel: viewModel,
+                            focusLimitState: viewModel.focusLimitState
+                        )
                     }
                     .padding(12)
                 }
@@ -110,9 +114,15 @@ struct ContentView: View {
         }
     }
 
-    private var footer: some View {
+}
+
+private struct PanelFooter: View {
+    @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var focusLimitState: DeadlineFocusLimitState
+
+    var body: some View {
         let strings = NativeStrings.current
-        return HStack {
+        HStack {
             Text(strings.shownTotal(viewModel.focusDeadlines.count, viewModel.deadlines.count))
             Spacer()
             Text("0.6.2")
@@ -194,6 +204,7 @@ struct FocusSummarySection: View {
 
 struct RecentDeadlineSection: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var focusLimitState: DeadlineFocusLimitState
     let onUpdate: (DeadlineTask, String, Date, String) -> Void
     let onComplete: (DeadlineTask) -> Void
     let onRestore: (DeadlineTask) -> Void
@@ -212,7 +223,7 @@ struct RecentDeadlineSection: View {
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                LiquidSegmentedControl(selection: $viewModel.focusLimit, values: [3, 5, 10])
+                LiquidSegmentedControl(selection: $focusLimitState.value, values: [3, 5, 10])
             }
 
             if viewModel.focusDeadlines.isEmpty {

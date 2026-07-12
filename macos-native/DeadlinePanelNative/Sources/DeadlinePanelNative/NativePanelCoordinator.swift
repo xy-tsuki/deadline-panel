@@ -176,6 +176,7 @@ final class NativePanelCoordinator {
         collapsedPanel.contentView = makeHostingView(
             CollapsedStripView(
                 viewModel: viewModel,
+                focusLimitState: viewModel.focusLimitState,
                 onHover: { [weak self] hovering in
                     guard self?.isDraggingCollapsedStrip != true else {
                         return

@@ -68,6 +68,7 @@ final class NativeSettingsController {
     private func makeSettingsView() -> SettingsView {
         SettingsView(
             viewModel: viewModel,
+            focusLimitState: viewModel.focusLimitState,
             loginItemController: loginItemController,
             notificationController: notificationController,
             onShowDock: onShowDock,
@@ -97,6 +98,7 @@ final class NativeSettingsController {
 
 struct SettingsView: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var focusLimitState: DeadlineFocusLimitState
     @ObservedObject var loginItemController: LoginItemController
     @ObservedObject var notificationController: NativeNotificationController
     let onShowDock: () -> Void
@@ -138,7 +140,7 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            LiquidSegmentedControl(selection: $viewModel.focusLimit, values: [3, 5, 10])
+                            LiquidSegmentedControl(selection: $focusLimitState.value, values: [3, 5, 10])
                         }
 
                         Divider().opacity(0.25)

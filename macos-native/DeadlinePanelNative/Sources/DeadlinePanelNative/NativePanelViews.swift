@@ -12,6 +12,7 @@ enum PanelCommand {
 
 struct CollapsedStripView: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var focusLimitState: DeadlineFocusLimitState
     @State private var isDragging = false
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
     let onHover: (Bool) -> Void
@@ -75,7 +76,7 @@ struct CollapsedStripView: View {
         guard let task = viewModel.focusDeadlines.first else {
             return strings.noDeadlines
         }
-        return "\(strings.stripTopPrefix(viewModel.focusLimit)) | \(task.title)（\(relativeStripDueText(task.dueAt))）"
+        return "\(strings.stripTopPrefix(focusLimitState.value)) | \(task.title)（\(relativeStripDueText(task.dueAt))）"
     }
 }
 

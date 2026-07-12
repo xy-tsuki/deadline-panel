@@ -1,20 +1,33 @@
 import Foundation
 
 @MainActor
+final class DeadlineFocusLimitState: ObservableObject {
+    @Published var value: Int {
+        didSet {
+            guard value != oldValue else {
+                return
+            }
+            defaults.set(value, forKey: "focus_limit")
+        }
+    }
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let stored = defaults.integer(forKey: "focus_limit")
+        value = [3, 5, 10].contains(stored) ? stored : 3
+    }
+}
+
+@MainActor
 final class DeadlineViewModel: ObservableObject {
     @Published private(set) var coreVersion = "0.6.2"
     @Published private(set) var deadlines: [DeadlineTask] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var commandMessage: String?
-    @Published var focusLimit = UserDefaults.standard.integer(forKey: "focus_limit") == 0
-        ? 3
-        : UserDefaults.standard.integer(forKey: "focus_limit") {
-        didSet {
-            UserDefaults.standard.set(focusLimit, forKey: "focus_limit")
-        }
-    }
     private let repository: DeadlineRepository
-    private var didLoadStoredFocusLimit = false
+    let focusLimitState: DeadlineFocusLimitState
     private(set) var completedDeadlines: [DeadlineTask] = []
     private(set) var currentDeadlines: [DeadlineTask] = []
     var onTasksUpserted: (([DeadlineTask]) -> Void)?
@@ -22,13 +35,18 @@ final class DeadlineViewModel: ObservableObject {
 
     init(repository: DeadlineRepository = RustDeadlineRepository()) {
         self.repository = repository
+        focusLimitState = DeadlineFocusLimitState()
+    }
+
+    var focusLimit: Int {
+        get { focusLimitState.value }
+        set { focusLimitState.value = newValue }
     }
 
     func load() {
         do {
             coreVersion = try repository.coreVersion()
             applyDeadlines(try repository.listDeadlines())
-            loadStoredFocusLimitIfNeeded()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -381,17 +399,6 @@ final class DeadlineViewModel: ObservableObject {
                 .prefix(2)
         )
         deadlines = nextDeadlines
-    }
-
-    private func loadStoredFocusLimitIfNeeded() {
-        guard !didLoadStoredFocusLimit else {
-            return
-        }
-        didLoadStoredFocusLimit = true
-        let stored = UserDefaults.standard.integer(forKey: "focus_limit")
-        if [3, 5, 10].contains(stored) {
-            focusLimit = stored
-        }
     }
 
     private func findTask(idOrTitle: String) -> DeadlineTask? {
