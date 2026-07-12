@@ -249,6 +249,7 @@ struct RecentDeadlineSection: View {
                             onDelete: onDelete,
                             onControlInteractionChanged: onControlInteractionChanged
                         )
+                        .equatable()
                     }
                 }
                 .padding(.top, 4)
@@ -287,6 +288,7 @@ struct CompletedSection: View {
                             onDelete: onDelete,
                             onControlInteractionChanged: onControlInteractionChanged
                         )
+                        .equatable()
                     }
                 }
                 .padding(.top, 4)
@@ -364,6 +366,7 @@ struct PanelToolsSection: View {
                                         onDelete: onDeleteCompleted,
                                         onControlInteractionChanged: onControlInteractionChanged
                                     )
+                                    .equatable()
                                 }
                             }
                             .transition(.liquidDisclosure)
@@ -978,7 +981,7 @@ struct ImportPreviewRowView: View {
     }
 }
 
-struct CompactTaskRow: View {
+struct CompactTaskRow: View, @MainActor Equatable {
     let task: DeadlineTask
     let index: Int?
     var showsDivider = true
@@ -1002,6 +1005,12 @@ struct CompactTaskRow: View {
     @State private var customPostponeDate = Date()
     @FocusState private var focusedField: TaskEditField?
     @Environment(\.colorScheme) private var colorScheme
+
+    static func == (left: CompactTaskRow, right: CompactTaskRow) -> Bool {
+        left.task == right.task
+            && left.index == right.index
+            && left.showsDivider == right.showsDivider
+    }
 
     var body: some View {
         let strings = NativeStrings.current

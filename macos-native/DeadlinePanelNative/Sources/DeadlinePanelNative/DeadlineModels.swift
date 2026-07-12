@@ -10,7 +10,7 @@ struct RustCoreVersion: Decodable {
     let version: String
 }
 
-struct DeadlineTask: Codable, Identifiable {
+struct DeadlineTask: Codable, Identifiable, Equatable {
     let id: String
     let title: String
     let dueAt: String
