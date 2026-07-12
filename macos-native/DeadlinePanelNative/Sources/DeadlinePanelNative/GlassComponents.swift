@@ -155,8 +155,10 @@ struct LiquidSegmentedControl: View {
         HStack(spacing: 2) {
             ForEach(values, id: \.self) { value in
                 Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                        selection = value
+                    if selection != value {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            selection = value
+                        }
                     }
                 } label: {
                     Text("Top \(value)")
@@ -181,11 +183,6 @@ struct LiquidSegmentedControl: View {
                 .onHover { hovering in
                     hoveredValue = hovering ? value : (hoveredValue == value ? nil : hoveredValue)
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in pressedValue = value }
-                        .onEnded { _ in pressedValue = nil }
-                )
             }
         }
         .padding(4)
@@ -241,8 +238,10 @@ struct LiquidTextSegmentedControl: View {
         HStack(spacing: 2) {
             ForEach(options) { option in
                 Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
-                        selection = option.id
+                    if selection != option.id {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            selection = option.id
+                        }
                     }
                 } label: {
                     Text(option.title)
@@ -268,11 +267,6 @@ struct LiquidTextSegmentedControl: View {
                 .onHover { hovering in
                     hoveredID = hovering ? option.id : (hoveredID == option.id ? nil : hoveredID)
                 }
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in pressedID = option.id }
-                        .onEnded { _ in pressedID = nil }
-                )
             }
         }
         .padding(4)
