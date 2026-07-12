@@ -1,6 +1,6 @@
 # Deadline Panel Native
 
-Native macOS 0.6.1 rewrite experiment.
+Native macOS 0.6.2 rewrite experiment.
 
 This package contains the SwiftUI/AppKit shell. The app links to the Rust core
 crate at `../../crates/deadline-core`.

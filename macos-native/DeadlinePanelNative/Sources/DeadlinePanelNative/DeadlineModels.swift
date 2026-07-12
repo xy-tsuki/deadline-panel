@@ -52,6 +52,12 @@ struct ImportResult: Decodable {
     let imported: Int
 }
 
+struct DeadlineExportEnvelope: Codable {
+    let version: Int
+    let exportedAt: String
+    let tasks: [DeadlineTask]
+}
+
 enum RustCoreClientError: Error, CustomStringConvertible {
     case nullPointer
     case rustError(String)

@@ -9,6 +9,9 @@ private func deadline_initialize_json(_ databasePath: UnsafePointer<CChar>) -> U
 @_silgen_name("deadline_migrate_legacy_database_json")
 private func deadline_migrate_legacy_database_json(_ legacyDatabasePath: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 
+@_silgen_name("deadline_read_legacy_settings_json")
+private func deadline_read_legacy_settings_json(_ legacyDatabasePath: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
+
 @_silgen_name("deadline_import_tasks_json")
 private func deadline_import_tasks_json(_ input: UnsafePointer<CChar>) -> UnsafeMutablePointer<CChar>?
 
@@ -174,24 +177,40 @@ final class RustCoreClient {
         }
         didAttemptMigration = true
 
-        let defaultsKey = "nativeDidAttemptLegacyDatabaseMigration"
-        if UserDefaults.standard.bool(forKey: defaultsKey) {
+        let taskMigrationKey = "nativeDidAttemptLegacyDatabaseMigration"
+        let settingsMigrationKey = "nativeDidAttemptLegacySettingsMigration"
+        let defaults = UserDefaults.standard
+        let didMigrateTasks = defaults.bool(forKey: taskMigrationKey)
+        let didMigrateSettings = defaults.bool(forKey: settingsMigrationKey)
+        if didMigrateTasks && didMigrateSettings {
             return
         }
 
         guard let legacyURL = legacyDatabaseURL(nativeDatabasePath: nativeDatabasePath),
               FileManager.default.fileExists(atPath: legacyURL.path)
         else {
-            UserDefaults.standard.set(true, forKey: defaultsKey)
+            defaults.set(true, forKey: taskMigrationKey)
+            defaults.set(true, forKey: settingsMigrationKey)
             return
         }
 
-        try backupLegacyDatabase(legacyURL)
-        let response: RustCoreEnvelope<[String: Int]> = try legacyURL.path.withCString { pointer in
-            try decode(deadline_migrate_legacy_database_json(pointer))
+        if !didMigrateTasks {
+            try backupLegacyDatabase(legacyURL)
+            let response: RustCoreEnvelope<LegacyMigrationResult> = try legacyURL.path.withCString { pointer in
+                try decode(deadline_migrate_legacy_database_json(pointer))
+            }
+            let result = try unwrap(response)
+            migrateLegacySettings(result.settings)
+            defaults.set(true, forKey: taskMigrationKey)
+            defaults.set(true, forKey: settingsMigrationKey)
+            return
         }
-        _ = try unwrap(response)
-        UserDefaults.standard.set(true, forKey: defaultsKey)
+
+        let response: RustCoreEnvelope<[String: String]> = try legacyURL.path.withCString { pointer in
+            try decode(deadline_read_legacy_settings_json(pointer))
+        }
+        migrateLegacySettings(try unwrap(response))
+        defaults.set(true, forKey: settingsMigrationKey)
     }
 
     private func legacyDatabaseURL(nativeDatabasePath: String) -> URL? {
@@ -218,4 +237,30 @@ final class RustCoreClient {
             try FileManager.default.copyItem(at: legacyURL, to: backupURL)
         }
     }
+
+    private func migrateLegacySettings(_ settings: [String: String]) {
+        let supportedKeys = [
+            "focus_limit",
+            "app_language",
+            "sync_supabase_url",
+            "sync_supabase_anon_key",
+            "sync_code"
+        ]
+        let defaults = UserDefaults.standard
+        for key in supportedKeys where defaults.object(forKey: key) == nil {
+            guard let value = settings[key], !value.isEmpty else {
+                continue
+            }
+            if key == "focus_limit", let limit = Int(value) {
+                defaults.set(limit, forKey: key)
+            } else {
+                defaults.set(value, forKey: key)
+            }
+        }
+    }
+}
+
+private struct LegacyMigrationResult: Decodable {
+    let imported: Int
+    let settings: [String: String]
 }

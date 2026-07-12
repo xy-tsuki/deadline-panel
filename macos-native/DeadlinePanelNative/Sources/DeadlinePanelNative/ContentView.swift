@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var cloudSyncController: NativeCloudSyncController
     let onHideTemporarily: (() -> Void)?
     let onImportJSON: (() -> Void)?
     let onExportJSON: (() -> Void)?
@@ -14,6 +15,7 @@ struct ContentView: View {
 
     init(
         viewModel: DeadlineViewModel,
+        cloudSyncController: NativeCloudSyncController,
         onHideTemporarily: (() -> Void)? = nil,
         onImportJSON: (() -> Void)? = nil,
         onExportJSON: (() -> Void)? = nil,
@@ -21,6 +23,7 @@ struct ContentView: View {
         onControlInteractionChanged: ((Bool) -> Void)? = nil
     ) {
         self.viewModel = viewModel
+        self.cloudSyncController = cloudSyncController
         self.onHideTemporarily = onHideTemporarily
         self.onImportJSON = onImportJSON
         self.onExportJSON = onExportJSON
@@ -32,44 +35,65 @@ struct ContentView: View {
         ZStack {
             NativeWindowBackground()
 
-            ScrollView {
-                VStack(spacing: 0) {
-                    notices
-                    FocusSummarySection(
-                        viewModel: viewModel,
-                        onHideTemporarily: onHideTemporarily
-                    )
-                    RecentDeadlineSection(
-                        viewModel: viewModel,
-                        onUpdate: { task, title, dueAt, notes in
-                            viewModel.updateManual(task: task, title: title, dueAt: dueAt, priority: task.priority, notes: notes)
-                        },
-                        onComplete: { viewModel.complete($0) },
-                        onRestore: { viewModel.restore($0) },
-                        onToggleCurrent: { viewModel.toggleCurrent($0) },
-                        onPostpone: { task, days in viewModel.postpone(task, days: days) },
-                        onDelete: { viewModel.delete($0) },
-                        onControlInteractionChanged: onControlInteractionChanged
-                    )
-                    PanelToolsSection(
-                        viewModel: viewModel,
-                        onUpdateCompleted: { task, title, dueAt, notes in
-                            viewModel.updateManual(task: task, title: title, dueAt: dueAt, priority: task.priority, notes: notes)
-                        },
-                        onRestoreCompleted: { viewModel.restore($0) },
-                        onDeleteCompleted: { viewModel.delete($0) },
-                        onOpenSettings: onOpenSettings,
-                        onControlInteractionChanged: onControlInteractionChanged
-                    )
-                    footer
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(height: 0)
+                            .id(PanelScrollAnchor.top)
+                        notices
+                        FocusSummarySection(
+                            viewModel: viewModel,
+                            onHideTemporarily: onHideTemporarily
+                        )
+                        RecentDeadlineSection(
+                            viewModel: viewModel,
+                            onUpdate: { task, title, dueAt, notes in
+                                viewModel.updateManual(task: task, title: title, dueAt: dueAt, priority: task.priority, notes: notes)
+                            },
+                            onComplete: { viewModel.complete($0) },
+                            onRestore: { viewModel.restore($0) },
+                            onToggleCurrent: { viewModel.toggleCurrent($0) },
+                            onUpdatePriority: { task, priority in
+                                viewModel.updatePriority(task, priority: priority)
+                            },
+                            onPostpone: { task, days in viewModel.postpone(task, days: days) },
+                            onPostponeDate: { task, date in viewModel.postpone(task, to: date) },
+                            onDelete: { viewModel.delete($0) },
+                            onControlInteractionChanged: onControlInteractionChanged
+                        )
+                        PanelToolsSection(
+                            viewModel: viewModel,
+                            cloudSyncController: cloudSyncController,
+                            onUpdateCompleted: { task, title, dueAt, notes in
+                                viewModel.updateManual(task: task, title: title, dueAt: dueAt, priority: task.priority, notes: notes)
+                            },
+                            onRestoreCompleted: { viewModel.restore($0) },
+                            onDeleteCompleted: { viewModel.delete($0) },
+                            onOpenSettings: onOpenSettings,
+                            onContentCreated: {
+                                DispatchQueue.main.async {
+                                    withAnimation(.spring(response: 0.32, dampingFraction: 0.84)) {
+                                        proxy.scrollTo(PanelScrollAnchor.top, anchor: .top)
+                                    }
+                                }
+                            },
+                            onControlInteractionChanged: onControlInteractionChanged
+                        )
+                        footer
+                    }
+                    .padding(12)
                 }
-                .padding(12)
             }
         }
         .task {
             viewModel.load()
         }
         .nativePreferredColorScheme(appearanceMode)
+    }
+
+    private enum PanelScrollAnchor: Hashable {
+        case top
     }
 
     private var notices: some View {
@@ -94,7 +118,7 @@ struct ContentView: View {
         return HStack {
             Text(strings.shownTotal(viewModel.focusDeadlines.count, viewModel.deadlines.count))
             Spacer()
-            Text("0.6.1")
+            Text("0.6.2")
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
@@ -172,7 +196,9 @@ struct RecentDeadlineSection: View {
     let onComplete: (DeadlineTask) -> Void
     let onRestore: (DeadlineTask) -> Void
     let onToggleCurrent: (DeadlineTask) -> Void
+    let onUpdatePriority: (DeadlineTask, String) -> Void
     let onPostpone: (DeadlineTask, Int) -> Void
+    let onPostponeDate: (DeadlineTask, Date) -> Void
     let onDelete: (DeadlineTask) -> Void
     let onControlInteractionChanged: ((Bool) -> Void)?
 
@@ -204,7 +230,9 @@ struct RecentDeadlineSection: View {
                             onComplete: onComplete,
                             onRestore: onRestore,
                             onToggleCurrent: onToggleCurrent,
+                            onUpdatePriority: onUpdatePriority,
                             onPostpone: onPostpone,
+                            onPostponeDate: onPostponeDate,
                             onDelete: onDelete,
                             onControlInteractionChanged: onControlInteractionChanged
                         )
@@ -240,7 +268,9 @@ struct CompletedSection: View {
                             onComplete: { _ in },
                             onRestore: onRestore,
                             onToggleCurrent: { _ in },
+                            onUpdatePriority: { _, _ in },
                             onPostpone: { _, _ in },
+                            onPostponeDate: { _, _ in },
                             onDelete: onDelete,
                             onControlInteractionChanged: onControlInteractionChanged
                         )
@@ -254,15 +284,15 @@ struct CompletedSection: View {
 
 struct PanelToolsSection: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var cloudSyncController: NativeCloudSyncController
     let onUpdateCompleted: (DeadlineTask, String, Date, String) -> Void
     let onRestoreCompleted: (DeadlineTask) -> Void
     let onDeleteCompleted: (DeadlineTask) -> Void
     let onOpenSettings: (() -> Void)?
+    let onContentCreated: () -> Void
     let onControlInteractionChanged: ((Bool) -> Void)?
 
-    @State private var showAdd = false
-    @State private var showHistory = false
-    @State private var showImport = false
+    @State private var expandedSection: ExpandedSection?
 
     var body: some View {
         let strings = NativeStrings.current
@@ -271,13 +301,14 @@ struct PanelToolsSection: View {
                 VStack(alignment: .leading, spacing: 10) {
                     LiquidToolButton(title: strings.addDeadline, systemImage: "plus") {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            showAdd.toggle()
+                            toggle(.add)
                         }
                     }
 
-                    if showAdd {
+                    if expandedSection == .add {
                         InlineAddPanel(
                             viewModel: viewModel,
+                            onCreated: finishCreatingContent,
                             onControlInteractionChanged: onControlInteractionChanged
                         )
                             .transition(.liquidDisclosure)
@@ -290,13 +321,13 @@ struct PanelToolsSection: View {
                             badge: String(viewModel.completedDeadlines.count)
                         ) {
                             withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                                showHistory.toggle()
+                                toggle(.history)
                             }
                         }
                         Spacer()
                     }
 
-                    if showHistory {
+                    if expandedSection == .history {
                         if viewModel.completedDeadlines.isEmpty {
                             Text(strings.noHistory)
                                 .font(.caption)
@@ -304,7 +335,7 @@ struct PanelToolsSection: View {
                                 .padding(.leading, 4)
                         } else {
                             VStack(spacing: 0) {
-                                let tasks = Array(viewModel.completedDeadlines.prefix(6))
+                                let tasks = viewModel.completedDeadlines
                                 ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
                                     CompactTaskRow(
                                         task: task,
@@ -314,7 +345,9 @@ struct PanelToolsSection: View {
                                         onComplete: { _ in },
                                         onRestore: onRestoreCompleted,
                                         onToggleCurrent: { _ in },
+                                        onUpdatePriority: { _, _ in },
                                         onPostpone: { _, _ in },
+                                        onPostponeDate: { _, _ in },
                                         onDelete: onDeleteCompleted,
                                         onControlInteractionChanged: onControlInteractionChanged
                                     )
@@ -324,7 +357,13 @@ struct PanelToolsSection: View {
                         }
                     }
 
-                    CloudSyncPanel(viewModel: viewModel)
+                    CloudSyncPanel(
+                        controller: cloudSyncController,
+                        isOpen: Binding(
+                            get: { expandedSection == .cloud },
+                            set: { expandedSection = $0 ? .cloud : nil }
+                        )
+                    )
 
                     LiquidToolButton(title: strings.settingsTools, systemImage: "gearshape") {
                         onOpenSettings?()
@@ -332,27 +371,44 @@ struct PanelToolsSection: View {
 
                     LiquidToolButton(title: strings.importTitle, systemImage: "plus") {
                         withAnimation(.spring(response: 0.28, dampingFraction: 0.78)) {
-                            showImport.toggle()
+                            toggle(.importCommands)
                         }
                     }
 
-                    if showImport {
-                        ImportCommandPanel(viewModel: viewModel)
+                    if expandedSection == .importCommands {
+                        ImportCommandPanel(
+                            viewModel: viewModel,
+                            onImported: finishCreatingContent
+                        )
                             .transition(.liquidDisclosure)
                     }
                 }
             }
         }
     }
+
+    private enum ExpandedSection {
+        case add
+        case history
+        case cloud
+        case importCommands
+    }
+
+    private func toggle(_ section: ExpandedSection) {
+        expandedSection = expandedSection == section ? nil : section
+    }
+
+    private func finishCreatingContent() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            expandedSection = nil
+        }
+        onContentCreated()
+    }
 }
 
 struct CloudSyncPanel: View {
-    @StateObject private var controller: NativeCloudSyncController
-    @State private var isOpen = false
-
-    init(viewModel: DeadlineViewModel) {
-        _controller = StateObject(wrappedValue: NativeCloudSyncController(viewModel: viewModel))
-    }
+    @ObservedObject var controller: NativeCloudSyncController
+    @Binding var isOpen: Bool
 
     var body: some View {
         let strings = NativeStrings.current
@@ -425,7 +481,11 @@ struct CloudSyncPanel: View {
 
 struct InlineAddPanel: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    let onCreated: () -> Void
     let onControlInteractionChanged: ((Bool) -> Void)?
+    @State private var quickInput = ""
+    @State private var quickPreview: NewDeadlineInput?
+    @State private var quickMessage: String?
     @State private var title = ""
     @State private var dueAt = Date().addingTimeInterval(2 * 24 * 60 * 60)
     @State private var priority = "medium"
@@ -436,14 +496,49 @@ struct InlineAddPanel: View {
         GlassPanel(cornerRadius: 14, material: .thinMaterial) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    TextField(strings.quickAddPlaceholder, text: $viewModel.quickAddText)
+                    TextField(strings.quickAddPlaceholder, text: $quickInput)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit {
-                            viewModel.addQuickDeadline()
+                            parseQuickInput()
+                        }
+                        .onChange(of: quickInput) { _, _ in
+                            quickPreview = nil
+                            quickMessage = nil
                         }
                     LiquidToolButton(title: strings.parseAdd, systemImage: "return") {
-                        viewModel.addQuickDeadline()
+                        parseQuickInput()
                     }
+                }
+
+                if let quickPreview {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(quickPreview.title)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
+                            Text("\(formattedDue(quickPreview.dueAt)) · \(quickPreview.priority)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        LiquidToolButton(title: strings.confirmQuickAdd, systemImage: "checkmark") {
+                            guard viewModel.createDeadline(quickPreview) else {
+                                return
+                            }
+                            quickInput = ""
+                            self.quickPreview = nil
+                            quickMessage = nil
+                            onCreated()
+                        }
+                    }
+                    .padding(8)
+                    .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+
+                if let quickMessage {
+                    Text(quickMessage)
+                        .font(.caption)
+                        .foregroundStyle(quickPreview == nil ? .red : .secondary)
                 }
 
                 Divider().opacity(0.28)
@@ -454,7 +549,7 @@ struct InlineAddPanel: View {
                 DueInputControl(
                     label: strings.due,
                     date: $dueAt,
-                    onControlInteractionChanged: onControlInteractionChanged
+                    onControlInteractionChanged: nil
                 )
 
                 HStack(spacing: 8) {
@@ -477,10 +572,13 @@ struct InlineAddPanel: View {
                         guard !trimmedTitle.isEmpty else {
                             return
                         }
-                        viewModel.createManual(title: trimmedTitle, dueAt: dueAt, priority: priority, notes: notes)
+                        guard viewModel.createManual(title: trimmedTitle, dueAt: dueAt, priority: priority, notes: notes) else {
+                            return
+                        }
                         title = ""
                         notes = ""
                         priority = "medium"
+                        onCreated()
                     }
                 }
             }
@@ -492,6 +590,12 @@ struct InlineAddPanel: View {
         .onDisappear {
             onControlInteractionChanged?(false)
         }
+    }
+
+    private func parseQuickInput() {
+        let strings = NativeStrings.current
+        quickPreview = viewModel.parseQuickDeadline(quickInput)
+        quickMessage = quickPreview == nil ? strings.quickAddError : strings.quickAddReady
     }
 }
 
@@ -516,6 +620,11 @@ struct DueInputControl: View {
                 .font(font)
                 .focused($isFocused)
                 .onSubmit(commitText)
+
+            DatePickerPopoverButton(
+                date: $date,
+                onControlInteractionChanged: onControlInteractionChanged
+            )
         }
         .onAppear {
             text = formattedEditableDue(date)
@@ -548,8 +657,43 @@ struct DueInputControl: View {
     }
 }
 
+struct DatePickerPopoverButton: View {
+    @Binding var date: Date
+    let onControlInteractionChanged: ((Bool) -> Void)?
+    @State private var isPresented = false
+
+    var body: some View {
+        let strings = NativeStrings.current
+        LiquidIconButton(systemImage: "calendar", tint: .secondary) {
+            isPresented.toggle()
+        }
+        .help(strings.chooseDate)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            VStack(alignment: .trailing, spacing: 10) {
+                DatePicker(
+                    strings.chooseDate,
+                    selection: $date,
+                    displayedComponents: [.date, .hourAndMinute]
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+
+                Button(strings.done) {
+                    isPresented = false
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(14)
+        }
+        .onChange(of: isPresented) { _, presented in
+            onControlInteractionChanged?(presented)
+        }
+    }
+}
+
 struct ImportCommandPanel: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    let onImported: () -> Void
     @State private var rawImport = ""
     @State private var previewRows: [ImportPreviewRow] = []
     @State private var localMessage: String?
@@ -704,10 +848,13 @@ struct ImportCommandPanel: View {
             return
         }
 
-        viewModel.importDeadlineInputs(inputs)
+        guard viewModel.importDeadlineInputs(inputs) else {
+            return
+        }
         rawImport = ""
         previewRows = []
         localMessage = nil
+        onImported()
     }
 }
 
@@ -826,7 +973,9 @@ struct CompactTaskRow: View {
     let onComplete: (DeadlineTask) -> Void
     let onRestore: (DeadlineTask) -> Void
     let onToggleCurrent: (DeadlineTask) -> Void
+    let onUpdatePriority: (DeadlineTask, String) -> Void
     let onPostpone: (DeadlineTask, Int) -> Void
+    let onPostponeDate: (DeadlineTask, Date) -> Void
     let onDelete: (DeadlineTask) -> Void
     let onControlInteractionChanged: ((Bool) -> Void)?
 
@@ -836,6 +985,8 @@ struct CompactTaskRow: View {
     @State private var draftDueAt = Date()
     @State private var draftDueText = ""
     @State private var draftNotes = ""
+    @State private var showCustomPostpone = false
+    @State private var customPostponeDate = Date()
     @FocusState private var focusedField: TaskEditField?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -876,6 +1027,20 @@ struct CompactTaskRow: View {
                             LiquidIconButton(systemImage: "checkmark", tint: .secondary) {
                                 commitDue()
                             }
+                            DatePickerPopoverButton(
+                                date: Binding(
+                                    get: { draftDueAt },
+                                    set: { nextDate in
+                                        draftDueAt = nextDate
+                                        draftDueText = formattedEditableDue(nextDate)
+                                    }
+                                ),
+                                onControlInteractionChanged: { active in
+                                    if active {
+                                        onControlInteractionChanged?(true)
+                                    }
+                                }
+                            )
                         }
                     } else {
                         Text("\(strings.deadlineDuePrefix) \(formattedDue(task.dueAt))")
@@ -915,6 +1080,27 @@ struct CompactTaskRow: View {
                         .foregroundStyle(dueColor(task.dueAt))
                         .lineLimit(1)
                     GlassTag(text: task.priority, color: priorityColor(task.priority))
+                        .overlay {
+                            Menu {
+                                ForEach(["urgent", "high", "medium", "low"], id: \.self) { priority in
+                                    Button {
+                                        onUpdatePriority(task, priority)
+                                    } label: {
+                                        if priority == task.priority {
+                                            Label(priority, systemImage: "checkmark")
+                                        } else {
+                                            Text(priority)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Color.clear
+                                    .contentShape(Capsule())
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                        }
+                        .disabled(task.status == "completed")
                     Text(statusLabel(task.status, strings: strings))
                         .font(.system(size: 12))
                         .foregroundStyle(secondaryTaskText)
@@ -922,7 +1108,7 @@ struct CompactTaskRow: View {
                 .frame(width: 96, alignment: .trailing)
             }
 
-            if isHovered {
+            if isHovered || showCustomPostpone {
                 HStack(spacing: 11) {
                     LiquidIconButton(
                         systemImage: task.isCurrent ? "star.fill" : "star",
@@ -953,6 +1139,16 @@ struct CompactTaskRow: View {
                         Button(strings.plusOneDay) { onPostpone(task, 1) }
                         Button(strings.plusThreeDays) { onPostpone(task, 3) }
                         Button(strings.plusSevenDays) { onPostpone(task, 7) }
+                        Divider()
+                        Button(strings.customPostpone) {
+                            customPostponeDate = Calendar.current.date(
+                                byAdding: .day,
+                                value: 1,
+                                to: ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt) ?? Date()
+                            ) ?? Date()
+                            showCustomPostpone = true
+                            onControlInteractionChanged?(true)
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "calendar.badge.clock")
@@ -975,6 +1171,30 @@ struct CompactTaskRow: View {
                 .padding(.leading, 32)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
+
+            if showCustomPostpone {
+                HStack(spacing: 8) {
+                    DueInputControl(
+                        label: strings.due,
+                        date: $customPostponeDate,
+                        font: .caption,
+                        onControlInteractionChanged: { active in
+                            if active {
+                                onControlInteractionChanged?(true)
+                            }
+                        }
+                    )
+                    LiquidIconButton(systemImage: "checkmark", tint: .secondary) {
+                        onPostponeDate(task, customPostponeDate)
+                        closeCustomPostpone()
+                    }
+                    LiquidIconButton(systemImage: "xmark", tint: .secondary) {
+                        closeCustomPostpone()
+                    }
+                }
+                .padding(.leading, 32)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.vertical, 13)
         .contentShape(Rectangle())
@@ -992,7 +1212,7 @@ struct CompactTaskRow: View {
         }
         .onAppear(perform: syncDrafts)
         .onDisappear {
-            if editingField != nil {
+            if editingField != nil || showCustomPostpone {
                 onControlInteractionChanged?(false)
             }
         }
@@ -1091,6 +1311,11 @@ struct CompactTaskRow: View {
     private func finishEditing() {
         editingField = nil
         focusedField = nil
+        onControlInteractionChanged?(false)
+    }
+
+    private func closeCustomPostpone() {
+        showCustomPostpone = false
         onControlInteractionChanged?(false)
     }
 

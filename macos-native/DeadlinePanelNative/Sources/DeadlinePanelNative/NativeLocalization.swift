@@ -77,6 +77,9 @@ struct NativeStrings: Sendable {
     let syncNow: String
     let quickAddPlaceholder: String
     let parseAdd: String
+    let quickAddReady: String
+    let quickAddError: String
+    let confirmQuickAdd: String
     let title: String
     let due: String
     let priority: String
@@ -108,6 +111,9 @@ struct NativeStrings: Sendable {
     let plusOneDay: String
     let plusThreeDays: String
     let plusSevenDays: String
+    let customPostpone: String
+    let chooseDate: String
+    let done: String
     let unknownTime: String
     let overdue: String
     let overdueHours: @Sendable (Int) -> String
@@ -154,6 +160,12 @@ struct NativeStrings: Sendable {
     let backupFailed: String
     let noReleaseFound: String
     let latestVersion: @Sendable (String) -> String
+    let upToDate: @Sendable (String) -> String
+    let updateAvailable: @Sendable (String) -> String
+    let downloadUpdate: String
+    let viewRelease: String
+    let cancel: String
+    let updateDownloaded: @Sendable (String) -> String
     let updateCheckFailed: String
     let notificationUnchecked: String
     let notificationAllowed: String
@@ -198,7 +210,10 @@ struct NativeStrings: Sendable {
         syncing: "同步中...",
         syncNow: "立即同步",
         quickAddPlaceholder: "课程小测 明天 23:59 high",
-        parseAdd: "解析添加",
+        parseAdd: "解析",
+        quickAddReady: "已识别，可确认添加",
+        quickAddError: "无法识别，请写清标题和截止时间",
+        confirmQuickAdd: "确认添加",
         title: "标题",
         due: "截止",
         priority: "优先级",
@@ -230,6 +245,9 @@ struct NativeStrings: Sendable {
         plusOneDay: "+1 天",
         plusThreeDays: "+3 天",
         plusSevenDays: "+7 天",
+        customPostpone: "自定义日期",
+        chooseDate: "选择日期时间",
+        done: "完成",
         unknownTime: "时间未知",
         overdue: "已逾期",
         overdueHours: { "逾期 \($0) 小时" },
@@ -276,6 +294,12 @@ struct NativeStrings: Sendable {
         backupFailed: "备份失败",
         noReleaseFound: "暂未找到 release",
         latestVersion: { "最新版本：\($0)" },
+        upToDate: { "已是最新版本 \($0)" },
+        updateAvailable: { "发现新版本 \($0)" },
+        downloadUpdate: "下载更新",
+        viewRelease: "查看发布页",
+        cancel: "取消",
+        updateDownloaded: { "更新已下载到 \($0)" },
         updateCheckFailed: "检查更新失败",
         notificationUnchecked: "未检查",
         notificationAllowed: "已允许",
@@ -321,7 +345,10 @@ struct NativeStrings: Sendable {
         syncing: "同期中...",
         syncNow: "今すぐ同期",
         quickAddPlaceholder: "小テスト 明日 23:59 high",
-        parseAdd: "解析して追加",
+        parseAdd: "解析",
+        quickAddReady: "認識しました。確認して追加できます",
+        quickAddError: "認識できません。タイトルと締切を確認してください",
+        confirmQuickAdd: "確認して追加",
         title: "タイトル",
         due: "締切",
         priority: "優先度",
@@ -353,6 +380,9 @@ struct NativeStrings: Sendable {
         plusOneDay: "+1 日",
         plusThreeDays: "+3 日",
         plusSevenDays: "+7 日",
+        customPostpone: "日時を指定",
+        chooseDate: "日時を選択",
+        done: "完了",
         unknownTime: "日時不明",
         overdue: "期限切れ",
         overdueHours: { "\($0) 時間超過" },
@@ -399,6 +429,12 @@ struct NativeStrings: Sendable {
         backupFailed: "バックアップに失敗しました",
         noReleaseFound: "release が見つかりません",
         latestVersion: { "最新バージョン：\($0)" },
+        upToDate: { "最新バージョン \($0) を使用中です" },
+        updateAvailable: { "新しいバージョン \($0) があります" },
+        downloadUpdate: "更新をダウンロード",
+        viewRelease: "リリースページを表示",
+        cancel: "キャンセル",
+        updateDownloaded: { "更新を \($0) にダウンロードしました" },
         updateCheckFailed: "更新確認に失敗しました",
         notificationUnchecked: "未確認",
         notificationAllowed: "許可済み",
@@ -444,7 +480,10 @@ struct NativeStrings: Sendable {
         syncing: "Syncing...",
         syncNow: "Sync now",
         quickAddPlaceholder: "Quiz tomorrow 23:59 high",
-        parseAdd: "Parse add",
+        parseAdd: "Parse",
+        quickAddReady: "Recognized. Confirm to add",
+        quickAddError: "Could not recognize a title and due time",
+        confirmQuickAdd: "Confirm add",
         title: "Title",
         due: "Due",
         priority: "Priority",
@@ -476,6 +515,9 @@ struct NativeStrings: Sendable {
         plusOneDay: "+1 day",
         plusThreeDays: "+3 days",
         plusSevenDays: "+7 days",
+        customPostpone: "Custom date",
+        chooseDate: "Choose date and time",
+        done: "Done",
         unknownTime: "Unknown time",
         overdue: "Overdue",
         overdueHours: { "\($0)h overdue" },
@@ -522,6 +564,12 @@ struct NativeStrings: Sendable {
         backupFailed: "Backup failed",
         noReleaseFound: "No release found",
         latestVersion: { "Latest version: \($0)" },
+        upToDate: { "You are up to date (\($0))" },
+        updateAvailable: { "Version \($0) is available" },
+        downloadUpdate: "Download update",
+        viewRelease: "View release",
+        cancel: "Cancel",
+        updateDownloaded: { "Update downloaded to \($0)" },
         updateCheckFailed: "Update check failed",
         notificationUnchecked: "Unchecked",
         notificationAllowed: "Allowed",

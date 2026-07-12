@@ -369,8 +369,43 @@ struct SettingsView: View {
                     return
                 }
                 let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-                await MainActor.run {
-                    message = NativeStrings.current.latestVersion(release.tag_name)
+                let currentVersion = Bundle.main.object(
+                    forInfoDictionaryKey: "CFBundleShortVersionString"
+                ) as? String ?? "0.6.2"
+                guard Self.isVersion(release.tag_name, newerThan: currentVersion) else {
+                    await MainActor.run {
+                        message = NativeStrings.current.upToDate(currentVersion)
+                    }
+                    return
+                }
+
+                let choice = await MainActor.run {
+                    showUpdateAlert(version: release.tag_name)
+                }
+                switch choice {
+                case .download:
+                    if let asset = Self.preferredUpdateAsset(from: release.assets) {
+                        let path = try await downloadUpdate(asset)
+                        await MainActor.run {
+                            message = NativeStrings.current.updateDownloaded(path)
+                        }
+                    } else if let releaseURL = URL(string: release.html_url) {
+                        await MainActor.run {
+                            NSWorkspace.shared.open(releaseURL)
+                            message = NativeStrings.current.updateAvailable(release.tag_name)
+                        }
+                    }
+                case .viewRelease:
+                    if let releaseURL = URL(string: release.html_url) {
+                        await MainActor.run {
+                            NSWorkspace.shared.open(releaseURL)
+                            message = NativeStrings.current.updateAvailable(release.tag_name)
+                        }
+                    }
+                case .cancel:
+                    await MainActor.run {
+                        message = NativeStrings.current.updateAvailable(release.tag_name)
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -379,8 +414,145 @@ struct SettingsView: View {
             }
         }
     }
+
+    private func showUpdateAlert(version: String) -> UpdateChoice {
+        let strings = NativeStrings.current
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = strings.updateAvailable(version)
+        alert.informativeText = strings.latestVersion(version)
+        alert.addButton(withTitle: strings.downloadUpdate)
+        alert.addButton(withTitle: strings.viewRelease)
+        alert.addButton(withTitle: strings.cancel)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .download
+        case .alertSecondButtonReturn:
+            return .viewRelease
+        default:
+            return .cancel
+        }
+    }
+
+    private func downloadUpdate(_ asset: GitHubReleaseAsset) async throws -> String {
+        guard let url = URL(string: asset.browser_download_url) else {
+            throw UpdateError.invalidAssetURL
+        }
+        let (temporaryURL, response) = try await URLSession.shared.download(from: url)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode)
+        else {
+            throw UpdateError.downloadFailed
+        }
+        let downloads = try FileManager.default.url(
+            for: .downloadsDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let target = Self.availableDownloadURL(
+            in: downloads,
+            preferredName: asset.name
+        )
+        try FileManager.default.moveItem(at: temporaryURL, to: target)
+        await MainActor.run {
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+        }
+        return target.path
+    }
+
+    private static func preferredUpdateAsset(
+        from assets: [GitHubReleaseAsset]
+    ) -> GitHubReleaseAsset? {
+        let supported = assets.filter { asset in
+            let name = asset.name.lowercased()
+            return name.hasSuffix(".dmg") || name.hasSuffix(".zip")
+        }
+        let macAssets = supported.filter { asset in
+            let name = asset.name.lowercased()
+            return name.hasSuffix(".dmg")
+                || name.contains("macos")
+                || name.contains("darwin")
+                || name.contains("apple-silicon")
+        }
+        let candidates = macAssets.isEmpty ? [] : macAssets
+#if arch(arm64)
+        return candidates.first { asset in
+            let name = asset.name.lowercased()
+            return name.contains("arm64") || name.contains("apple-silicon")
+        } ?? candidates.first { $0.name.lowercased().hasSuffix(".dmg") }
+            ?? candidates.first
+#else
+        return candidates.first { $0.name.lowercased().contains("x86_64") }
+            ?? candidates.first { $0.name.lowercased().hasSuffix(".dmg") }
+            ?? candidates.first
+#endif
+    }
+
+    private static func isVersion(_ candidate: String, newerThan current: String) -> Bool {
+        let left = versionComponents(candidate)
+        let right = versionComponents(current)
+        for index in 0..<max(left.count, right.count) {
+            let leftValue = index < left.count ? left[index] : 0
+            let rightValue = index < right.count ? right[index] : 0
+            if leftValue != rightValue {
+                return leftValue > rightValue
+            }
+        }
+        return false
+    }
+
+    private static func versionComponents(_ value: String) -> [Int] {
+        value
+            .trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+            .split(separator: ".")
+            .map { component in
+                Int(component.prefix { $0.isNumber }) ?? 0
+            }
+    }
+
+    private static func availableDownloadURL(
+        in directory: URL,
+        preferredName: String
+    ) -> URL {
+        let initial = directory.appendingPathComponent(preferredName)
+        guard FileManager.default.fileExists(atPath: initial.path) else {
+            return initial
+        }
+        let source = URL(fileURLWithPath: preferredName)
+        let stem = source.deletingPathExtension().lastPathComponent
+        let fileExtension = source.pathExtension
+        for suffix in 2...999 {
+            let name = fileExtension.isEmpty
+                ? "\(stem)-\(suffix)"
+                : "\(stem)-\(suffix).\(fileExtension)"
+            let candidate = directory.appendingPathComponent(name)
+            if !FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return directory.appendingPathComponent(UUID().uuidString + "-" + preferredName)
+    }
 }
 
 private struct GitHubRelease: Decodable {
     let tag_name: String
+    let html_url: String
+    let assets: [GitHubReleaseAsset]
+}
+
+private struct GitHubReleaseAsset: Decodable {
+    let name: String
+    let browser_download_url: String
+}
+
+private enum UpdateChoice {
+    case download
+    case viewRelease
+    case cancel
+}
+
+private enum UpdateError: Error {
+    case invalidAssetURL
+    case downloadFailed
 }

@@ -1,7 +1,10 @@
 use crate::model::{NewTaskInput, UpdateTaskInput};
 use crate::parser::{parse_quick_add, QuickAddParseResult};
 use crate::repository::{DeadlineRepository, InMemoryDeadlineRepository, RepositoryError};
-use crate::storage::{read_tasks_from_database, SqliteDeadlineRepository, StorageError};
+use crate::storage::{
+    read_app_settings_from_database, read_tasks_from_database, SqliteDeadlineRepository,
+    StorageError,
+};
 use crate::DEADLINE_CORE_VERSION;
 use chrono::{SecondsFormat, Utc};
 use once_cell::sync::Lazy;
@@ -157,11 +160,28 @@ pub unsafe extern "C" fn deadline_migrate_legacy_database_json(
         Ok(tasks) => tasks,
         Err(error) => return storage_error_json(error),
     };
+    let settings = match read_app_settings_from_database(&legacy_database_path) {
+        Ok(settings) => settings,
+        Err(error) => return storage_error_json(error),
+    };
     let Ok(mut repository) = REPOSITORY.lock() else {
         return error_json("repository-lock-failed");
     };
     match repository.merge_deadlines(tasks) {
-        Ok(count) => ok_json(json!({ "imported": count })),
+        Ok(count) => ok_json(json!({ "imported": count, "settings": settings })),
+        Err(error) => storage_error_json(error),
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn deadline_read_legacy_settings_json(
+    legacy_database_path: *const c_char,
+) -> *mut c_char {
+    let Ok(legacy_database_path) = c_string_to_string(legacy_database_path) else {
+        return error_json("invalid-input");
+    };
+    match read_app_settings_from_database(&legacy_database_path) {
+        Ok(settings) => ok_json(settings),
         Err(error) => storage_error_json(error),
     }
 }

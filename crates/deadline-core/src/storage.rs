@@ -4,6 +4,7 @@ use crate::model::{
 use crate::repository::RepositoryError;
 use crate::sorting::sort_deadline_tasks;
 use rusqlite::{params, Connection, Row};
+use std::collections::BTreeMap;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -265,6 +266,18 @@ pub fn read_tasks_from_database(path: impl AsRef<Path>) -> Result<Vec<DeadlineTa
     rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
 }
 
+pub fn read_app_settings_from_database(
+    path: impl AsRef<Path>,
+) -> Result<BTreeMap<String, String>, StorageError> {
+    let db = Connection::open(path)?;
+    let mut statement = db.prepare("SELECT key, value FROM app_settings")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    rows.collect::<Result<BTreeMap<_, _>, _>>()
+        .map_err(StorageError::from)
+}
+
 fn configure_database(db: &Connection) -> Result<(), StorageError> {
     db.execute_batch(
         "
@@ -431,6 +444,31 @@ mod tests {
         let tasks = read_tasks_from_database(&path).expect("read legacy");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "legacy-id");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+    }
+
+    #[test]
+    fn reads_legacy_application_settings() {
+        let path = std::env::temp_dir().join(format!(
+            "deadline-core-legacy-settings-test-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        {
+            let repository = SqliteDeadlineRepository::open(&path).expect("open sqlite");
+            repository
+                .db
+                .execute(
+                    "INSERT INTO app_settings (key, value, updated_at) VALUES (?1, ?2, ?3)",
+                    params!["sync_code", "dp_sync_v1_test", "2026-07-11T00:00:00Z"],
+                )
+                .expect("insert setting");
+        }
+
+        let settings = read_app_settings_from_database(&path).expect("read settings");
+        assert_eq!(settings.get("sync_code"), Some(&"dp_sync_v1_test".to_string()));
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));

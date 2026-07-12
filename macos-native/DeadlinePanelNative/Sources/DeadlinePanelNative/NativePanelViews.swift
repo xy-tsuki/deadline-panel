@@ -157,6 +157,7 @@ private func relativeStripDueText(_ dueAt: String) -> String {
 
 struct ExpandedPanelView: View {
     @ObservedObject var viewModel: DeadlineViewModel
+    @ObservedObject var cloudSyncController: NativeCloudSyncController
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
     let onHover: (Bool) -> Void
     let onControlInteractionChanged: (Bool) -> Void
@@ -167,6 +168,7 @@ struct ExpandedPanelView: View {
     var body: some View {
         ContentView(
             viewModel: viewModel,
+            cloudSyncController: cloudSyncController,
             onHideTemporarily: { onCommand(.hide) },
             onImportJSON: onImportJSON,
             onExportJSON: onExportJSON,

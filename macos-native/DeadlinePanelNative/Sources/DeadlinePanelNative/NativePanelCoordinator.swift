@@ -21,6 +21,7 @@ final class NativePanelCoordinator {
     }
 
     private let viewModel: DeadlineViewModel
+    private let cloudSyncController: NativeCloudSyncController
     private lazy var fileController = FileImportExportController(viewModel: viewModel)
     private lazy var collapsedPanel = makePanel(
         width: Layout.collapsedWindowWidth,
@@ -49,8 +50,9 @@ final class NativePanelCoordinator {
     private var languageObserver: NSObjectProtocol?
     var onOpenSettings: (() -> Void)?
 
-    init(viewModel: DeadlineViewModel) {
+    init(viewModel: DeadlineViewModel, cloudSyncController: NativeCloudSyncController) {
         self.viewModel = viewModel
+        self.cloudSyncController = cloudSyncController
         configureContent()
         appearanceObserver = NotificationCenter.default.addObserver(
             forName: NativeAppearance.didChangeNotification,
@@ -156,6 +158,7 @@ final class NativePanelCoordinator {
             return
         }
         isExpanded = true
+        cloudSyncController.syncAfterExpansion()
         positionExpandedPanel()
         expandedPanel.orderFrontRegardless()
         expandedPanel.makeKey()
@@ -202,6 +205,7 @@ final class NativePanelCoordinator {
         expandedPanel.contentView = makeHostingView(
             ExpandedPanelView(
                 viewModel: viewModel,
+                cloudSyncController: cloudSyncController,
                 onHover: { [weak self] hovering in
                     if hovering {
                         self?.cancelScheduledCollapse()

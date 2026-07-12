@@ -2,7 +2,7 @@ import Foundation
 
 @MainActor
 final class DeadlineViewModel: ObservableObject {
-    @Published private(set) var coreVersion = "0.6.1"
+    @Published private(set) var coreVersion = "0.6.2"
     @Published private(set) var deadlines: [DeadlineTask] = []
     @Published private(set) var errorMessage: String?
     @Published private(set) var commandMessage: String?
@@ -13,9 +13,10 @@ final class DeadlineViewModel: ObservableObject {
             UserDefaults.standard.set(focusLimit, forKey: "focus_limit")
         }
     }
-    @Published var quickAddText = ""
-
     private let repository: DeadlineRepository
+    private var didLoadStoredFocusLimit = false
+    var onTasksUpserted: (([DeadlineTask]) -> Void)?
+    var onTaskDeleted: ((String) -> Void)?
 
     init(repository: DeadlineRepository = RustDeadlineRepository()) {
         self.repository = repository
@@ -25,6 +26,7 @@ final class DeadlineViewModel: ObservableObject {
         do {
             coreVersion = try repository.coreVersion()
             deadlines = try repository.listDeadlines()
+            loadStoredFocusLimitIfNeeded()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -40,7 +42,17 @@ final class DeadlineViewModel: ObservableObject {
     }
 
     var completedDeadlines: [DeadlineTask] {
-        deadlines.filter { $0.status == "completed" }
+        deadlines
+            .filter { $0.status == "completed" }
+            .sorted { left, right in
+                let leftDate = ISO8601DateFormatter.deadlinePanelDate(
+                    from: left.completedAt ?? left.updatedAt
+                ) ?? .distantPast
+                let rightDate = ISO8601DateFormatter.deadlinePanelDate(
+                    from: right.completedAt ?? right.updatedAt
+                ) ?? .distantPast
+                return leftDate > rightDate
+            }
     }
 
     var currentDeadlines: [DeadlineTask] {
@@ -51,28 +63,27 @@ final class DeadlineViewModel: ObservableObject {
         )
     }
 
-    func addQuickDeadline() {
-        let text = quickAddText.trimmingCharacters(in: .whitespacesAndNewlines)
+    func parseQuickDeadline(_ rawText: String) -> NewDeadlineInput? {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            errorMessage = NativeLanguage.resolved == .en ? "Enter a deadline first" : NativeLanguage.resolved == .ja ? "Deadline を入力してください" : "请输入 Deadline"
-            return
+            errorMessage = nil
+            return nil
         }
 
         do {
             let input = try repository.parseQuickAdd(text)
-            _ = try repository.createDeadline(input)
-            quickAddText = ""
-            deadlines = try repository.listDeadlines()
-            commandMessage = NativeLanguage.resolved == .en ? "Deadline added" : NativeLanguage.resolved == .ja ? "Deadline を追加しました" : "已添加 Deadline"
             errorMessage = nil
+            return input
         } catch {
-            errorMessage = String(describing: error)
+            errorMessage = nil
+            return nil
         }
     }
 
-    func createManual(title: String, dueAt: Date, priority: String, notes: String) {
+    @discardableResult
+    func createManual(title: String, dueAt: Date, priority: String, notes: String) -> Bool {
         do {
-            _ = try repository.createDeadline(
+            let task = try repository.createDeadline(
                 NewDeadlineInput(
                     title: title,
                     dueAt: ISO8601DateFormatter.deadlinePanelString(from: dueAt),
@@ -84,37 +95,46 @@ final class DeadlineViewModel: ObservableObject {
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Deadline added" : NativeLanguage.resolved == .ja ? "Deadline を追加しました" : "已添加 Deadline"
             errorMessage = nil
+            onTasksUpserted?([task])
+            return true
         } catch {
             errorMessage = String(describing: error)
+            return false
         }
     }
 
-    func createDeadline(_ input: NewDeadlineInput) {
+    @discardableResult
+    func createDeadline(_ input: NewDeadlineInput) -> Bool {
         do {
-            _ = try repository.createDeadline(input)
+            let task = try repository.createDeadline(input)
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Deadline added" : NativeLanguage.resolved == .ja ? "Deadline を追加しました" : "已添加 Deadline"
             errorMessage = nil
+            onTasksUpserted?([task])
+            return true
         } catch {
             errorMessage = String(describing: error)
+            return false
         }
     }
 
-    func importDeadlineInputs(_ inputs: [NewDeadlineInput]) {
+    @discardableResult
+    func importDeadlineInputs(_ inputs: [NewDeadlineInput]) -> Bool {
         guard !inputs.isEmpty else {
             errorMessage = NativeStrings.current.nothingToImport
-            return
+            return false
         }
 
         do {
-            for input in inputs {
-                _ = try repository.createDeadline(input)
-            }
+            let created = try inputs.map { try repository.createDeadline($0) }
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Imported \(inputs.count) items" : NativeLanguage.resolved == .ja ? "\(inputs.count) 件をインポートしました" : "已导入 \(inputs.count) 条事项"
             errorMessage = nil
+            onTasksUpserted?(created)
+            return true
         } catch {
             errorMessage = String(describing: error)
+            return false
         }
     }
 
@@ -146,7 +166,7 @@ final class DeadlineViewModel: ObservableObject {
                 return
             }
             do {
-                _ = try repository.updateDeadline(
+                let updated = try repository.updateDeadline(
                     id: target.id,
                     fields: UpdateTaskInput(
                         title: fields.title,
@@ -162,13 +182,14 @@ final class DeadlineViewModel: ObservableObject {
                 deadlines = try repository.listDeadlines()
                 commandMessage = NativeLanguage.resolved == .en ? "Updated" : NativeLanguage.resolved == .ja ? "更新しました" : "已更新"
                 errorMessage = nil
+                onTasksUpserted?([updated])
             } catch {
                 errorMessage = String(describing: error)
             }
         }
     }
 
-    func replaceTasksAfterCloudSync(_ tasks: [DeadlineTask]) {
+    func replaceTasksAfterCloudSync(_ tasks: [DeadlineTask], silent: Bool = false) {
         do {
             let currentIDs = Set(deadlines.map(\.id))
             let nextIDs = Set(tasks.map(\.id))
@@ -177,7 +198,9 @@ final class DeadlineViewModel: ObservableObject {
             }
             _ = try repository.importDeadlines(tasks)
             deadlines = try repository.listDeadlines()
-            commandMessage = NativeLanguage.resolved == .en ? "Synced \(deadlines.count) items" : NativeLanguage.resolved == .ja ? "\(deadlines.count) 件を同期しました" : "已同步 \(deadlines.count) 条事项"
+            if !silent {
+                commandMessage = NativeLanguage.resolved == .en ? "Synced \(deadlines.count) items" : NativeLanguage.resolved == .ja ? "\(deadlines.count) 件を同期しました" : "已同步 \(deadlines.count) 条事项"
+            }
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -186,7 +209,7 @@ final class DeadlineViewModel: ObservableObject {
 
     func updateManual(task: DeadlineTask, title: String, dueAt: Date, priority: String, notes: String) {
         do {
-            _ = try repository.updateDeadline(
+            let updated = try repository.updateDeadline(
                 id: task.id,
                 fields: UpdateTaskInput(
                     title: title,
@@ -202,6 +225,7 @@ final class DeadlineViewModel: ObservableObject {
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Updated" : NativeLanguage.resolved == .ja ? "更新しました" : "已更新"
             errorMessage = nil
+            onTasksUpserted?([updated])
         } catch {
             errorMessage = String(describing: error)
         }
@@ -209,10 +233,11 @@ final class DeadlineViewModel: ObservableObject {
 
     func complete(_ task: DeadlineTask) {
         do {
-            _ = try repository.completeDeadline(id: task.id)
+            let updated = try repository.completeDeadline(id: task.id)
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Completed" : NativeLanguage.resolved == .ja ? "完了しました" : "已完成"
             errorMessage = nil
+            onTasksUpserted?([updated])
         } catch {
             errorMessage = String(describing: error)
         }
@@ -220,10 +245,11 @@ final class DeadlineViewModel: ObservableObject {
 
     func restore(_ task: DeadlineTask) {
         do {
-            _ = try repository.restoreDeadline(id: task.id)
+            let updated = try repository.restoreDeadline(id: task.id)
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Restored" : NativeLanguage.resolved == .ja ? "復元しました" : "已恢复"
             errorMessage = nil
+            onTasksUpserted?([updated])
         } catch {
             errorMessage = String(describing: error)
         }
@@ -231,24 +257,29 @@ final class DeadlineViewModel: ObservableObject {
 
     func toggleCurrent(_ task: DeadlineTask) {
         do {
-            _ = try repository.toggleCurrentDeadline(id: task.id)
+            let updated = try repository.toggleCurrentDeadline(id: task.id)
             deadlines = try repository.listDeadlines()
             commandMessage = nil
             errorMessage = nil
+            onTasksUpserted?([updated])
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
     func postpone(_ task: DeadlineTask, days: Int) {
+        guard let date = ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt),
+              let nextDate = Calendar.current.date(byAdding: .day, value: days, to: date)
+        else {
+            errorMessage = NativeStrings.current.unknownTime
+            return
+        }
+        postpone(task, to: nextDate)
+    }
+
+    func postpone(_ task: DeadlineTask, to nextDate: Date) {
         do {
-            guard let date = ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt),
-                  let nextDate = Calendar.current.date(byAdding: .day, value: days, to: date)
-            else {
-                errorMessage = NativeStrings.current.unknownTime
-                return
-            }
-            _ = try repository.updateDeadline(
+            let updated = try repository.updateDeadline(
                 id: task.id,
                 fields: UpdateTaskInput(
                     title: nil,
@@ -264,17 +295,48 @@ final class DeadlineViewModel: ObservableObject {
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Postponed" : NativeLanguage.resolved == .ja ? "延期しました" : "已延期"
             errorMessage = nil
+            onTasksUpserted?([updated])
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    func updatePriority(_ task: DeadlineTask, priority: String) {
+        guard priority != task.priority else {
+            return
+        }
+        do {
+            let updated = try repository.updateDeadline(
+                id: task.id,
+                fields: UpdateTaskInput(
+                    title: nil,
+                    dueAt: nil,
+                    priority: priority,
+                    notes: nil,
+                    status: nil,
+                    source: nil,
+                    isCurrent: nil,
+                    completedAt: nil
+                )
+            )
+            deadlines = try repository.listDeadlines()
+            commandMessage = NativeLanguage.resolved == .en ? "Priority updated" : NativeLanguage.resolved == .ja ? "優先度を更新しました" : "已更新优先级"
+            errorMessage = nil
+            onTasksUpserted?([updated])
         } catch {
             errorMessage = String(describing: error)
         }
     }
 
     func delete(_ task: DeadlineTask) {
-        _ = repository.deleteDeadline(id: task.id)
+        let deleted = repository.deleteDeadline(id: task.id)
         do {
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Deleted" : NativeLanguage.resolved == .ja ? "削除しました" : "已删除"
             errorMessage = nil
+            if deleted {
+                onTaskDeleted?(task.id)
+            }
         } catch {
             errorMessage = String(describing: error)
         }
@@ -283,11 +345,18 @@ final class DeadlineViewModel: ObservableObject {
     func importTasks(from url: URL) {
         do {
             let data = try Data(contentsOf: url)
-            let tasks = try JSONDecoder().decode([DeadlineTask].self, from: data)
+            let decoder = JSONDecoder()
+            let tasks: [DeadlineTask]
+            if let envelope = try? decoder.decode(DeadlineExportEnvelope.self, from: data) {
+                tasks = envelope.tasks
+            } else {
+                tasks = try decoder.decode([DeadlineTask].self, from: data)
+            }
             let count = try repository.importDeadlines(tasks)
             deadlines = try repository.listDeadlines()
             commandMessage = NativeLanguage.resolved == .en ? "Imported \(count) items" : NativeLanguage.resolved == .ja ? "\(count) 件をインポートしました" : "已导入 \(count) 条事项"
             errorMessage = nil
+            onTasksUpserted?(tasks)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -295,7 +364,12 @@ final class DeadlineViewModel: ObservableObject {
 
     func exportTasks(to url: URL) {
         do {
-            let data = try Self.exportEncoder().encode(deadlines)
+            let envelope = DeadlineExportEnvelope(
+                version: 1,
+                exportedAt: ISO8601DateFormatter.deadlinePanelString(from: Date()),
+                tasks: deadlines
+            )
+            let data = try Self.exportEncoder().encode(envelope)
             try data.write(to: url, options: .atomic)
             commandMessage = NativeLanguage.resolved == .en ? "Exported \(deadlines.count) items" : NativeLanguage.resolved == .ja ? "\(deadlines.count) 件をエクスポートしました" : "已导出 \(deadlines.count) 条事项"
             errorMessage = nil
@@ -307,6 +381,17 @@ final class DeadlineViewModel: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return encoder
+    }
+
+    private func loadStoredFocusLimitIfNeeded() {
+        guard !didLoadStoredFocusLimit else {
+            return
+        }
+        didLoadStoredFocusLimit = true
+        let stored = UserDefaults.standard.integer(forKey: "focus_limit")
+        if [3, 5, 10].contains(stored) {
+            focusLimit = stored
+        }
     }
 
     private func findTask(idOrTitle: String) -> DeadlineTask? {

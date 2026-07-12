@@ -4,6 +4,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let viewModel = DeadlineViewModel()
     private let notificationController = NativeNotificationController()
+    private lazy var cloudSyncController = NativeCloudSyncController(viewModel: viewModel)
     private var panelCoordinator: NativePanelCoordinator?
     private var menuBarController: NativeMenuBarController?
     private var fullscreenMonitor: NativeFullscreenMonitor?
@@ -12,7 +13,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         NativeAppearance.applyAppAppearance()
         configureApplicationIcon()
-        let coordinator = NativePanelCoordinator(viewModel: viewModel)
+        viewModel.load()
+        let cloudController = cloudSyncController
+        viewModel.onTasksUpserted = { [weak cloudController] tasks in
+            cloudController?.pushTasks(tasks)
+        }
+        viewModel.onTaskDeleted = { [weak cloudController] id in
+            cloudController?.deleteTask(id: id)
+        }
+        let coordinator = NativePanelCoordinator(
+            viewModel: viewModel,
+            cloudSyncController: cloudController
+        )
         panelCoordinator = coordinator
         menuBarController = NativeMenuBarController(
             panelCoordinator: coordinator,
@@ -27,6 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.showCollapsed()
         notificationController.refreshAuthorizationStatus()
         monitor.start()
+        cloudController.startAutomaticSync()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        cloudSyncController.stopAutomaticSync()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

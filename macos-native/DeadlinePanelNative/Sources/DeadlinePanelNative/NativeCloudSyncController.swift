@@ -16,6 +16,7 @@ final class NativeCloudSyncController: ObservableObject {
         static let syncURL = "sync_supabase_url"
         static let anonKey = "sync_supabase_anon_key"
         static let syncCode = "sync_code"
+        static let pendingDeletedIDs = "sync_pending_deleted_ids"
     }
     private enum Defaults {
         static let syncURL = "https://fuchvkdnmveelvwxtbjq.supabase.co"
@@ -23,6 +24,12 @@ final class NativeCloudSyncController: ObservableObject {
     }
 
     private let viewModel: DeadlineViewModel
+    private var automaticSyncTimer: Timer?
+    private var startupSyncTask: Task<Void, Never>?
+    private var lastSyncAttemptAt: Date?
+
+    private static let automaticSyncInterval: TimeInterval = 5 * 60
+    private static let expansionSyncMinimumInterval: TimeInterval = 60
 
     init(viewModel: DeadlineViewModel) {
         self.viewModel = viewModel
@@ -37,7 +44,7 @@ final class NativeCloudSyncController: ObservableObject {
         showAdvanced = syncURL.isEmpty || anonKey.isEmpty
     }
 
-    func saveSettings() {
+    func saveSettings(reportSuccess: Bool = true) {
         let code = syncCode.trimmingCharacters(in: .whitespacesAndNewlines)
         let nextCode = code.isEmpty ? Self.generateSyncCode() : code
         syncCode = nextCode
@@ -45,7 +52,9 @@ final class NativeCloudSyncController: ObservableObject {
         defaults.set(Self.normalizedSupabaseURL(syncURL), forKey: DefaultsKey.syncURL)
         defaults.set(anonKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: DefaultsKey.anonKey)
         defaults.set(nextCode, forKey: DefaultsKey.syncCode)
-        message = NativeLanguage.resolved == .en ? "Sync config saved" : NativeLanguage.resolved == .ja ? "同期設定を保存しました" : "同步配置已保存"
+        if reportSuccess {
+            message = NativeLanguage.resolved == .en ? "Sync config saved" : NativeLanguage.resolved == .ja ? "同期設定を保存しました" : "同步配置已保存"
+        }
     }
 
     func generateOrConfirmSyncCode() {
@@ -70,27 +79,130 @@ final class NativeCloudSyncController: ObservableObject {
     }
 
     func syncNow() {
+        guard !isPending else {
+            return
+        }
         Task {
-            await performSync()
+            await performSync(silent: false)
         }
     }
 
-    private func performSync() async {
+    func startAutomaticSync() {
+        stopAutomaticSync()
+        startupSyncTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(10))
+            guard !Task.isCancelled else {
+                return
+            }
+            await self?.performSync(silent: true)
+        }
+        automaticSyncTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.automaticSyncInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.performSync(silent: true)
+            }
+        }
+    }
+
+    func stopAutomaticSync() {
+        startupSyncTask?.cancel()
+        startupSyncTask = nil
+        automaticSyncTimer?.invalidate()
+        automaticSyncTimer = nil
+    }
+
+    func syncAfterExpansion() {
+        if let lastSyncAttemptAt,
+           Date().timeIntervalSince(lastSyncAttemptAt) < Self.expansionSyncMinimumInterval
+        {
+            return
+        }
+        Task {
+            await performSync(silent: true)
+        }
+    }
+
+    func pushTask(_ task: DeadlineTask) {
+        pushTasks([task])
+    }
+
+    func pushTasks(_ tasks: [DeadlineTask]) {
+        guard !tasks.isEmpty else {
+            return
+        }
+        Task {
+            guard let settings = currentSettingsIfConfigured() else {
+                return
+            }
+            do {
+                let codeHash = Self.sha256(settings.syncCode)
+                try await upsertTasks(settings: settings, codeHash: codeHash, tasks: tasks)
+            } catch {
+                // Immediate sync is best-effort; the periodic full sync retries it.
+            }
+        }
+    }
+
+    func deleteTask(id: String) {
+        var pending = pendingDeletedIDs
+        pending.insert(id)
+        pendingDeletedIDs = pending
+        Task {
+            guard let settings = currentSettingsIfConfigured() else {
+                return
+            }
+            do {
+                try await deleteRemoteTask(settings: settings, codeHash: Self.sha256(settings.syncCode), id: id)
+                var remaining = pendingDeletedIDs
+                remaining.remove(id)
+                pendingDeletedIDs = remaining
+            } catch {
+                // Keep the tombstone so a later sync cannot restore the task.
+            }
+        }
+    }
+
+    private func performSync(silent: Bool) async {
+        guard !isPending else {
+            return
+        }
+        if silent && currentSettingsIfConfigured() == nil {
+            return
+        }
+        lastSyncAttemptAt = Date()
         isPending = true
-        message = NativeStrings.current.syncing
+        if !silent {
+            message = NativeStrings.current.syncing
+        }
         do {
-            saveSettings()
+            if !silent {
+                saveSettings(reportSuccess: false)
+            }
             let settings = try currentSettings()
             let codeHash = Self.sha256(settings.syncCode)
+            await flushPendingDeletes(settings: settings, codeHash: codeHash)
+            let deletedIDs = pendingDeletedIDs
             let remoteTasks = try await pullTasks(settings: settings, codeHash: codeHash)
-            let mergedTasks = merge(localTasks: viewModel.deadlines, remoteTasks: remoteTasks)
+                .filter { !deletedIDs.contains($0.id) }
+            let localTasks = viewModel.deadlines.filter { !deletedIDs.contains($0.id) }
+            let mergedTasks = merge(localTasks: localTasks, remoteTasks: remoteTasks)
             try await upsertTasks(settings: settings, codeHash: codeHash, tasks: mergedTasks)
-            viewModel.replaceTasksAfterCloudSync(mergedTasks)
-            message = NativeLanguage.resolved == .en ? "Sync complete" : NativeLanguage.resolved == .ja ? "同期しました" : "同步完成"
+            viewModel.replaceTasksAfterCloudSync(mergedTasks, silent: silent)
+            if !silent {
+                message = NativeLanguage.resolved == .en ? "Sync complete" : NativeLanguage.resolved == .ja ? "同期しました" : "同步完成"
+            }
         } catch {
-            message = NativeLanguage.resolved == .en ? "Sync failed. Check the Supabase config and RLS table" : NativeLanguage.resolved == .ja ? "同期に失敗しました。Supabase 設定と RLS テーブルを確認してください" : "同步失败，请检查 Supabase 配置和 RLS 表"
+            if !silent {
+                message = NativeLanguage.resolved == .en ? "Sync failed. Check the Supabase config and RLS table" : NativeLanguage.resolved == .ja ? "同期に失敗しました。Supabase 設定と RLS テーブルを確認してください" : "同步失败，请检查 Supabase 配置和 RLS 表"
+            }
         }
         isPending = false
+    }
+
+    private func currentSettingsIfConfigured() -> SyncSettings? {
+        try? currentSettings()
     }
 
     private func currentSettings() throws -> SyncSettings {
@@ -120,6 +232,28 @@ final class NativeCloudSyncController: ObservableObject {
         request.httpBody = data
         let (responseData, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: responseData)
+    }
+
+    private func deleteRemoteTask(settings: SyncSettings, codeHash: String, id: String) async throws {
+        let request = try makeRequest(settings: settings, rpcName: "deadline_sync_delete", body: [
+            "p_sync_code_hash": codeHash,
+            "p_task_id": id
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+    }
+
+    private func flushPendingDeletes(settings: SyncSettings, codeHash: String) async {
+        var remaining = pendingDeletedIDs
+        for id in Array(remaining) {
+            do {
+                try await deleteRemoteTask(settings: settings, codeHash: codeHash, id: id)
+                remaining.remove(id)
+            } catch {
+                continue
+            }
+        }
+        pendingDeletedIDs = remaining
     }
 
     private func makeRequest(settings: SyncSettings, rpcName: String, body: [String: String]) throws -> URLRequest {
@@ -189,6 +323,15 @@ final class NativeCloudSyncController: ObservableObject {
             return trimmed
         }
         return "\(scheme)://\(host)"
+    }
+
+    private var pendingDeletedIDs: Set<String> {
+        get {
+            Set(UserDefaults.standard.stringArray(forKey: DefaultsKey.pendingDeletedIDs) ?? [])
+        }
+        set {
+            UserDefaults.standard.set(Array(newValue).sorted(), forKey: DefaultsKey.pendingDeletedIDs)
+        }
     }
 }
 
