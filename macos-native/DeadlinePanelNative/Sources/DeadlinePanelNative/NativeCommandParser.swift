@@ -167,19 +167,8 @@ enum NativeCommandParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "/", with: "-")
 
-        let parseFormats = [
-            "yyyy-MM-dd HH:mm",
-            "yyyy-MM-dd'T'HH:mm",
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd'T'HH:mm:ss"
-        ]
-        for format in parseFormats {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = format
-            if let date = formatter.date(from: normalized) {
-                return ISO8601DateFormatter.deadlinePanelString(from: date)
-            }
+        if let date = ISO8601DateFormatter.deadlinePanelCommandDate(from: normalized) {
+            return ISO8601DateFormatter.deadlinePanelString(from: date)
         }
 
         return ISO8601DateFormatter.deadlinePanelDate(from: normalized)

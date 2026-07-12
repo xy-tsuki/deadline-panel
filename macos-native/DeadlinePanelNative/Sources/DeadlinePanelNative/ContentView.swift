@@ -163,7 +163,12 @@ struct FocusSummarySection: View {
 
                 HStack(spacing: 6) {
                     SummaryPill(text: viewModel.currentDeadlines.isEmpty ? strings.nearestDeadline : strings.currentTask)
-                    SummaryPill(text: relativeDueText(task.dueAt, strings: strings))
+                    SummaryPill(
+                        text: relativeDueText(
+                            ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt),
+                            strings: strings
+                        )
+                    )
                     GlassTag(text: task.priority, color: priorityColor(task.priority))
                 }
                 .padding(.top, 6)
@@ -992,6 +997,7 @@ struct CompactTaskRow: View {
 
     var body: some View {
         let strings = NativeStrings.current
+        let parsedDueAt = ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt)
         VStack(spacing: 7) {
             HStack(alignment: .top, spacing: 10) {
                 indexBadge
@@ -1043,7 +1049,7 @@ struct CompactTaskRow: View {
                             )
                         }
                     } else {
-                        Text("\(strings.deadlineDuePrefix) \(formattedDue(task.dueAt))")
+                        Text("\(strings.deadlineDuePrefix) \(formattedDue(task.dueAt, parsedDate: parsedDueAt))")
                             .font(.system(size: 12))
                             .foregroundStyle(secondaryTaskText)
                             .lineLimit(1)
@@ -1075,9 +1081,9 @@ struct CompactTaskRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(alignment: .trailing, spacing: 7) {
-                    Text(relativeDueText(task.dueAt, strings: strings))
+                    Text(relativeDueText(parsedDueAt, strings: strings))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(dueColor(task.dueAt))
+                        .foregroundStyle(dueColor(parsedDueAt))
                         .lineLimit(1)
                     GlassTag(text: task.priority, color: priorityColor(task.priority))
                         .overlay {
@@ -1144,7 +1150,7 @@ struct CompactTaskRow: View {
                             customPostponeDate = Calendar.current.date(
                                 byAdding: .day,
                                 value: 1,
-                                to: ISO8601DateFormatter.deadlinePanelDate(from: task.dueAt) ?? Date()
+                                to: parsedDueAt ?? Date()
                             ) ?? Date()
                             showCustomPostpone = true
                             onControlInteractionChanged?(true)
@@ -1459,8 +1465,8 @@ private func priorityColor(_ priority: String) -> Color {
     }
 }
 
-private func dueColor(_ dueAt: String) -> Color {
-    guard let date = ISO8601DateFormatter.deadlinePanelDate(from: dueAt) else {
+private func dueColor(_ date: Date?) -> Color {
+    guard let date else {
         return .secondary
     }
     if date < Date() {
@@ -1472,8 +1478,8 @@ private func dueColor(_ dueAt: String) -> Color {
     return .secondary
 }
 
-private func relativeDueText(_ dueAt: String, strings: NativeStrings = .current) -> String {
-    guard let date = ISO8601DateFormatter.deadlinePanelDate(from: dueAt) else {
+private func relativeDueText(_ date: Date?, strings: NativeStrings = .current) -> String {
+    guard let date else {
         return strings.unknownTime
     }
     let diff = date.timeIntervalSinceNow
@@ -1490,25 +1496,19 @@ private func relativeDueText(_ dueAt: String, strings: NativeStrings = .current)
     return strings.days(Int(ceil(diff / day)))
 }
 
-private func formattedDue(_ dueAt: String) -> String {
-    guard let date = ISO8601DateFormatter.deadlinePanelDate(from: dueAt) else {
+private func formattedDue(_ dueAt: String, parsedDate: Date? = nil) -> String {
+    guard let date = parsedDate ?? ISO8601DateFormatter.deadlinePanelDate(from: dueAt) else {
         return trimmedDueFallback(dueAt)
     }
     return formattedEditableDue(date)
 }
 
 private func formattedEditableDue(_ date: Date) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd HH:mm"
-    return formatter.string(from: date)
+    ISO8601DateFormatter.deadlinePanelEditableString(from: date)
 }
 
 private func parseEditableDue(_ value: String) -> Date? {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.dateFormat = "yyyy-MM-dd HH:mm"
-    return formatter.date(from: value.trimmingCharacters(in: .whitespacesAndNewlines))
+    ISO8601DateFormatter.deadlinePanelEditableDate(from: value)
 }
 
 private func trimmedDueFallback(_ dueAt: String) -> String {

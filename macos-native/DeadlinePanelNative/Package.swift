@@ -33,6 +33,10 @@ let package = Package(
                     "-Xlinker", "../../crates/deadline-core/target/release"
                 ])
             ]
+        ),
+        .testTarget(
+            name: "DeadlinePanelNativeTests",
+            dependencies: ["DeadlinePanelNative"]
         )
     ]
 )
