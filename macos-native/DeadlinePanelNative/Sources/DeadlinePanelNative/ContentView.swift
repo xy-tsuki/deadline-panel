@@ -253,7 +253,6 @@ struct RecentDeadlineSection: View {
                         .geometryGroup()
                     }
                 }
-                .geometryGroup()
                 .padding(.top, 4)
             }
         }
@@ -294,7 +293,6 @@ struct CompletedSection: View {
                         .geometryGroup()
                     }
                 }
-                .geometryGroup()
                 .padding(.top, 4)
             }
         }
@@ -374,7 +372,6 @@ struct PanelToolsSection: View {
                                     .geometryGroup()
                                 }
                             }
-                            .geometryGroup()
                             .transition(.liquidDisclosure)
                         }
                     }
