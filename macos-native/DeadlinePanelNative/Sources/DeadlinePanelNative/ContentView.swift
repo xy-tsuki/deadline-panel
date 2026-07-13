@@ -250,6 +250,7 @@ struct RecentDeadlineSection: View {
                             onControlInteractionChanged: onControlInteractionChanged
                         )
                         .equatable()
+                        .geometryGroup()
                     }
                 }
                 .padding(.top, 4)
@@ -289,6 +290,7 @@ struct CompletedSection: View {
                             onControlInteractionChanged: onControlInteractionChanged
                         )
                         .equatable()
+                        .geometryGroup()
                     }
                 }
                 .padding(.top, 4)
@@ -367,6 +369,7 @@ struct PanelToolsSection: View {
                                         onControlInteractionChanged: onControlInteractionChanged
                                     )
                                     .equatable()
+                                    .geometryGroup()
                                 }
                             }
                             .transition(.liquidDisclosure)
