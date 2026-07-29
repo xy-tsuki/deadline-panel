@@ -12,6 +12,7 @@ struct ContentView: View {
 
     @AppStorage(NativeLanguage.defaultsKey) private var languagePreference = NativeLanguage.system.rawValue
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
+    @AppStorage(NativeMotion.lowPowerDefaultsKey) private var lowPowerMode = false
 
     init(
         viewModel: DeadlineViewModel,
@@ -91,6 +92,7 @@ struct ContentView: View {
             }
         }
         .nativePreferredColorScheme(appearanceMode)
+        .nativeLowPowerMode(lowPowerMode)
     }
 
     private enum PanelScrollAnchor: Hashable {

@@ -112,6 +112,7 @@ struct SettingsView: View {
     @AppStorage("app_language") private var language = "system"
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
     @AppStorage(NativeFullscreenMonitor.defaultsKey) private var autoHideFullscreen = true
+    @AppStorage(NativeMotion.lowPowerDefaultsKey) private var lowPowerMode = false
     @State private var message: String?
     @State private var isCheckingUpdates = false
 
@@ -199,6 +200,12 @@ struct SettingsView: View {
                         Toggle(strings.autoHideFullscreen, isOn: $autoHideFullscreen)
 
                         Text(strings.autoHideFullscreenCopy)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+
+                        Toggle(strings.lowPowerMode, isOn: $lowPowerMode)
+
+                        Text(strings.lowPowerModeCopy)
                             .font(.system(size: 12))
                             .foregroundStyle(.secondary)
 
@@ -305,6 +312,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 520)
         .nativePreferredColorScheme(appearanceMode)
+        .nativeLowPowerMode(lowPowerMode)
         .onChange(of: appearanceMode) { _, _ in
             NativeAppearance.notifyChange()
         }

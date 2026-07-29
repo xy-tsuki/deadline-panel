@@ -140,6 +140,8 @@ struct NativeStrings: Sendable {
     let autostart: String
     let autoHideFullscreen: String
     let autoHideFullscreenCopy: String
+    let lowPowerMode: String
+    let lowPowerModeCopy: String
     let showInDock: String
     let hideFromDock: String
     let requestNotifications: String
@@ -274,6 +276,8 @@ struct NativeStrings: Sendable {
         autostart: "开机启动",
         autoHideFullscreen: "全屏时自动隐藏",
         autoHideFullscreenCopy: "当前台应用进入全屏时隐藏收起条，离开全屏后自动恢复。",
+        lowPowerMode: "低功耗模式",
+        lowPowerModeCopy: "关闭过渡、缩放和淡入淡出动画，减少 CPU 与 GPU 占用。",
         showInDock: "在程序坞显示",
         hideFromDock: "从程序坞隐藏",
         requestNotifications: "请求通知权限",
@@ -409,6 +413,8 @@ struct NativeStrings: Sendable {
         autostart: "自動起動",
         autoHideFullscreen: "フルスクリーン時に自動で隠す",
         autoHideFullscreenCopy: "前面のアプリがフルスクリーンのときにバーを隠し、戻ると自動で表示します。",
+        lowPowerMode: "低電力モード",
+        lowPowerModeCopy: "トランジション、拡大縮小、フェードを無効にして CPU と GPU の負荷を抑えます。",
         showInDock: "Dock に表示",
         hideFromDock: "Dock から隠す",
         requestNotifications: "通知権限を要求",
@@ -544,6 +550,8 @@ struct NativeStrings: Sendable {
         autostart: "Launch at startup",
         autoHideFullscreen: "Auto-hide in fullscreen",
         autoHideFullscreenCopy: "Hide the strip while the foreground app is fullscreen, then restore it when fullscreen ends.",
+        lowPowerMode: "Low Power Mode",
+        lowPowerModeCopy: "Disable transitions, scaling, and fades to reduce CPU and GPU usage.",
         showInDock: "Show in Dock",
         hideFromDock: "Hide from Dock",
         requestNotifications: "Request notifications",

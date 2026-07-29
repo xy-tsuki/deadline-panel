@@ -15,6 +15,7 @@ struct CollapsedStripView: View {
     @ObservedObject var focusLimitState: DeadlineFocusLimitState
     @State private var isDragging = false
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
+    @AppStorage(NativeMotion.lowPowerDefaultsKey) private var lowPowerMode = false
     let onHover: (Bool) -> Void
     let onDragStart: () -> Void
     let onDragChange: () -> Void
@@ -65,6 +66,7 @@ struct CollapsedStripView: View {
             PanelContextMenu(onCommand: onCommand)
         }
         .nativePreferredColorScheme(appearanceMode)
+        .nativeLowPowerMode(lowPowerMode)
     }
 
     private var title: String {
@@ -157,6 +159,7 @@ struct ExpandedPanelView: View {
     @ObservedObject var viewModel: DeadlineViewModel
     @ObservedObject var cloudSyncController: NativeCloudSyncController
     @AppStorage(NativeAppearance.defaultsKey) private var appearanceMode = "system"
+    @AppStorage(NativeMotion.lowPowerDefaultsKey) private var lowPowerMode = false
     let onHover: (Bool) -> Void
     let onControlInteractionChanged: (Bool) -> Void
     let onCommand: (PanelCommand) -> Void
@@ -176,6 +179,7 @@ struct ExpandedPanelView: View {
             .frame(width: 372, height: 600)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .nativePreferredColorScheme(appearanceMode)
+            .nativeLowPowerMode(lowPowerMode)
             .onHover(perform: onHover)
             .contextMenu {
                 PanelContextMenu(onCommand: onCommand)

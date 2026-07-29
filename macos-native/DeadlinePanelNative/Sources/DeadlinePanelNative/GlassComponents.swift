@@ -150,13 +150,14 @@ struct LiquidSegmentedControl: View {
     @State private var hoveredValue: Int?
     @State private var pressedValue: Int?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.nativeLowPowerMode) private var lowPowerMode
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(values, id: \.self) { value in
                 Button {
                     if selection != value {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                        withAnimation(lowPowerMode ? nil : .spring(response: 0.28, dampingFraction: 0.72)) {
                             selection = value
                         }
                     }
@@ -170,32 +171,41 @@ struct LiquidSegmentedControl: View {
                             if selection == value {
                                 LiquidCapsuleBackground(isHovered: true, dimming: 0.04)
                                     .matchedGeometryEffect(id: "selected-segment", in: namespace)
-                            } else if hoveredValue == value {
+                            } else if !lowPowerMode, hoveredValue == value {
                                 Capsule()
                                     .fill(.white.opacity(0.07))
                             }
                         }
                 }
                 .buttonStyle(.plain)
-                .scaleEffect(pressedValue == value ? 1.10 : hoveredValue == value ? 1.04 : 1)
-                .animation(.spring(response: 0.22, dampingFraction: 0.68), value: pressedValue)
-                .animation(.spring(response: 0.24, dampingFraction: 0.74), value: hoveredValue)
+                .scaleEffect(lowPowerMode ? 1 : (pressedValue == value ? 1.10 : hoveredValue == value ? 1.04 : 1))
+                .animation(lowPowerMode ? nil : .spring(response: 0.22, dampingFraction: 0.68), value: pressedValue)
+                .animation(lowPowerMode ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: hoveredValue)
                 .onHover { hovering in
+                    guard !lowPowerMode else {
+                        hoveredValue = nil
+                        return
+                    }
                     hoveredValue = hovering ? value : (hoveredValue == value ? nil : hoveredValue)
                 }
             }
         }
         .padding(4)
         .background {
-            LiquidCapsuleBackground(isHovered: hoveredValue != nil || pressedValue != nil, dimming: 0.06)
+            LiquidCapsuleBackground(
+                isHovered: !lowPowerMode && (hoveredValue != nil || pressedValue != nil),
+                dimming: 0.06
+            )
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { drag in
                     let nextValue = value(at: drag.location.x)
-                    pressedValue = nextValue
+                    if !lowPowerMode {
+                        pressedValue = nextValue
+                    }
                     if selection != nextValue {
-                        withAnimation(.spring(response: 0.24, dampingFraction: 0.7)) {
+                        withAnimation(lowPowerMode ? nil : .spring(response: 0.24, dampingFraction: 0.7)) {
                             selection = nextValue
                         }
                     }
@@ -233,13 +243,14 @@ struct LiquidTextSegmentedControl: View {
     @State private var hoveredID: String?
     @State private var pressedID: String?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.nativeLowPowerMode) private var lowPowerMode
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(options) { option in
                 Button {
                     if selection != option.id {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                        withAnimation(lowPowerMode ? nil : .spring(response: 0.28, dampingFraction: 0.72)) {
                             selection = option.id
                         }
                     }
@@ -254,32 +265,41 @@ struct LiquidTextSegmentedControl: View {
                             if selection == option.id {
                                 LiquidCapsuleBackground(isHovered: true, dimming: 0.04)
                                     .matchedGeometryEffect(id: "selected-text-segment", in: namespace)
-                            } else if hoveredID == option.id {
+                            } else if !lowPowerMode, hoveredID == option.id {
                                 Capsule()
                                     .fill(.white.opacity(0.07))
                             }
                         }
                 }
                 .buttonStyle(.plain)
-                .scaleEffect(pressedID == option.id ? 1.10 : hoveredID == option.id ? 1.04 : 1)
-                .animation(.spring(response: 0.22, dampingFraction: 0.68), value: pressedID)
-                .animation(.spring(response: 0.24, dampingFraction: 0.74), value: hoveredID)
+                .scaleEffect(lowPowerMode ? 1 : (pressedID == option.id ? 1.10 : hoveredID == option.id ? 1.04 : 1))
+                .animation(lowPowerMode ? nil : .spring(response: 0.22, dampingFraction: 0.68), value: pressedID)
+                .animation(lowPowerMode ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: hoveredID)
                 .onHover { hovering in
+                    guard !lowPowerMode else {
+                        hoveredID = nil
+                        return
+                    }
                     hoveredID = hovering ? option.id : (hoveredID == option.id ? nil : hoveredID)
                 }
             }
         }
         .padding(4)
         .background {
-            LiquidCapsuleBackground(isHovered: hoveredID != nil || pressedID != nil, dimming: 0.06)
+            LiquidCapsuleBackground(
+                isHovered: !lowPowerMode && (hoveredID != nil || pressedID != nil),
+                dimming: 0.06
+            )
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
                 .onChanged { drag in
                     let nextID = optionID(at: drag.location.x)
-                    pressedID = nextID
+                    if !lowPowerMode {
+                        pressedID = nextID
+                    }
                     if selection != nextID {
-                        withAnimation(.spring(response: 0.24, dampingFraction: 0.7)) {
+                        withAnimation(lowPowerMode ? nil : .spring(response: 0.24, dampingFraction: 0.7)) {
                             selection = nextID
                         }
                     }
@@ -317,6 +337,7 @@ struct LiquidToolButton: View {
     @State private var hovering = false
     @State private var pressing = false
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.nativeLowPowerMode) private var lowPowerMode
 
     var body: some View {
         Button(action: action) {
@@ -340,19 +361,19 @@ struct LiquidToolButton: View {
             .frame(height: 34)
             .foregroundStyle(buttonTextColor)
             .background {
-                LiquidCapsuleBackground(isHovered: hovering, dimming: 0.06)
+                LiquidCapsuleBackground(isHovered: !lowPowerMode && hovering, dimming: 0.06)
             }
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
-        .scaleEffect(pressing ? 1.06 : hovering ? 1.025 : 1)
+        .scaleEffect(lowPowerMode ? 1 : (pressing ? 1.06 : hovering ? 1.025 : 1))
         .opacity(isDisabled ? 0.55 : 1)
-        .animation(.spring(response: 0.22, dampingFraction: 0.7), value: hovering)
-        .animation(.spring(response: 0.18, dampingFraction: 0.65), value: pressing)
-        .onHover { hovering = $0 }
+        .animation(lowPowerMode ? nil : .spring(response: 0.22, dampingFraction: 0.7), value: hovering)
+        .animation(lowPowerMode ? nil : .spring(response: 0.18, dampingFraction: 0.65), value: pressing)
+        .onHover { hovering = lowPowerMode ? false : $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressing = true }
+                .onChanged { _ in pressing = !lowPowerMode }
                 .onEnded { _ in pressing = false }
         )
     }
@@ -373,6 +394,7 @@ struct LiquidIconButton: View {
 
     @State private var hovering = false
     @State private var pressing = false
+    @Environment(\.nativeLowPowerMode) private var lowPowerMode
 
     var body: some View {
         Button(action: action) {
@@ -381,19 +403,19 @@ struct LiquidIconButton: View {
                 .frame(width: 30, height: 30)
                 .foregroundStyle(tint)
                 .background {
-                    LiquidCircleBackground(isHovered: hovering, dimming: 0.05)
+                    LiquidCircleBackground(isHovered: !lowPowerMode && hovering, dimming: 0.05)
                 }
         }
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.45 : 1)
-        .scaleEffect(pressing ? 1.12 : hovering ? 1.05 : 1)
-        .animation(.spring(response: 0.2, dampingFraction: 0.66), value: hovering)
-        .animation(.spring(response: 0.16, dampingFraction: 0.62), value: pressing)
-        .onHover { hovering = $0 }
+        .scaleEffect(lowPowerMode ? 1 : (pressing ? 1.12 : hovering ? 1.05 : 1))
+        .animation(lowPowerMode ? nil : .spring(response: 0.2, dampingFraction: 0.66), value: hovering)
+        .animation(lowPowerMode ? nil : .spring(response: 0.16, dampingFraction: 0.62), value: pressing)
+        .onHover { hovering = lowPowerMode ? false : $0 }
         .simultaneousGesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { _ in pressing = true }
+                .onChanged { _ in pressing = !lowPowerMode }
                 .onEnded { _ in pressing = false }
         )
     }

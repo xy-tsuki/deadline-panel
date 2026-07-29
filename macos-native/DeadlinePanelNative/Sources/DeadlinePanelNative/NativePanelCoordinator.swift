@@ -324,9 +324,11 @@ final class NativePanelCoordinator {
     }
 
     private func positionCollapsedPanel() {
-        let visibleFrame = NSScreen.main?.visibleFrame ?? .zero
-        let savedFrame = savedCollapsedFrame(in: visibleFrame)
-        let frame = savedFrame ?? defaultCollapsedFrame(in: visibleFrame)
+        guard let screen = collapsedPanel.screen ?? NSScreen.main ?? NSScreen.screens.first else {
+            return
+        }
+        let savedFrame = savedCollapsedFrame(on: screen)
+        let frame = savedFrame ?? defaultCollapsedFrame(in: screen.visibleFrame)
         collapsedPanel.setFrame(frame, display: true)
     }
 
@@ -347,14 +349,20 @@ final class NativePanelCoordinator {
         let mouseLocation = NSEvent.mouseLocation
         let deltaX = mouseLocation.x - dragStartMouseLocation.x
         let deltaY = mouseLocation.y - dragStartMouseLocation.y
-        let visibleFrame = collapsedPanel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) })
+            ?? collapsedPanel.screen
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+        else {
+            return
+        }
         let proposed = NSRect(
             x: dragStartOrigin.x + deltaX,
             y: dragStartOrigin.y + deltaY,
             width: Layout.collapsedWindowWidth,
             height: Layout.collapsedWindowHeight
         )
-        collapsedPanel.setFrame(clampedCollapsedFrame(proposed, in: visibleFrame), display: false)
+        collapsedPanel.setFrame(clampedCollapsedFrame(proposed, on: screen), display: false)
     }
 
     private func endCollapsedDrag() {
@@ -370,7 +378,7 @@ final class NativePanelCoordinator {
         return NSRect(x: x, y: y, width: Layout.collapsedWindowWidth, height: Layout.collapsedWindowHeight)
     }
 
-    private func savedCollapsedFrame(in visibleFrame: NSRect) -> NSRect? {
+    private func savedCollapsedFrame(on screen: NSScreen) -> NSRect? {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: DefaultsKey.collapsedX) != nil,
               defaults.object(forKey: DefaultsKey.collapsedY) != nil
@@ -383,10 +391,10 @@ final class NativePanelCoordinator {
             width: Layout.collapsedWindowWidth,
             height: Layout.collapsedWindowHeight
         )
-        guard visibleFrame.intersects(frame) else {
+        guard screen.frame.intersects(frame) else {
             return nil
         }
-        return clampedCollapsedFrame(frame, in: visibleFrame)
+        return clampedCollapsedFrame(frame, on: screen)
     }
 
     private func saveCollapsedFrame(_ frame: NSRect) {
@@ -395,10 +403,14 @@ final class NativePanelCoordinator {
         defaults.set(frame.minY, forKey: DefaultsKey.collapsedY)
     }
 
-    private func clampedCollapsedFrame(_ frame: NSRect, in visibleFrame: NSRect) -> NSRect {
-        let x = min(max(frame.minX, visibleFrame.minX + Layout.margin), visibleFrame.maxX - Layout.collapsedWindowWidth - Layout.margin)
-        let y = min(max(frame.minY, visibleFrame.minY + Layout.margin), visibleFrame.maxY - Layout.collapsedWindowHeight - Layout.margin)
-        return NSRect(x: x, y: y, width: Layout.collapsedWindowWidth, height: Layout.collapsedWindowHeight)
+    private func clampedCollapsedFrame(_ frame: NSRect, on screen: NSScreen) -> NSRect {
+        NativePanelPlacement.clampedCollapsedFrame(
+            frame,
+            screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame,
+            size: NSSize(width: Layout.collapsedWindowWidth, height: Layout.collapsedWindowHeight),
+            margin: Layout.margin
+        )
     }
 
     private func positionExpandedPanel() {
@@ -420,6 +432,24 @@ final class NativePanelCoordinator {
             NSRect(x: x, y: y, width: Layout.width, height: Layout.expandedHeight),
             display: true
         )
+    }
+}
+
+enum NativePanelPlacement {
+    static func clampedCollapsedFrame(
+        _ frame: NSRect,
+        screenFrame: NSRect,
+        visibleFrame: NSRect,
+        size: NSSize,
+        margin: CGFloat
+    ) -> NSRect {
+        let minimumX = visibleFrame.minX + margin
+        let maximumX = max(minimumX, visibleFrame.maxX - size.width - margin)
+        let minimumY = screenFrame.minY + margin
+        let maximumY = max(minimumY, visibleFrame.maxY - size.height - margin)
+        let x = min(max(frame.minX, minimumX), maximumX)
+        let y = min(max(frame.minY, minimumY), maximumY)
+        return NSRect(origin: NSPoint(x: x, y: y), size: size)
     }
 }
 
