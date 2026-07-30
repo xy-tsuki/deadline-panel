@@ -183,11 +183,14 @@ final class NativeCloudSyncController: ObservableObject {
             let settings = try currentSettings()
             let codeHash = Self.sha256(settings.syncCode)
             await flushPendingDeletes(settings: settings, codeHash: codeHash)
-            let deletedIDs = pendingDeletedIDs
-            let remoteTasks = try await pullTasks(settings: settings, codeHash: codeHash)
-                .filter { !deletedIDs.contains($0.id) }
-            let localTasks = viewModel.deadlines.filter { !deletedIDs.contains($0.id) }
-            let mergedTasks = merge(localTasks: localTasks, remoteTasks: remoteTasks)
+            let deletedIDs = pendingDeletedIDs.union(
+                try await pullDeletedTaskIDs(settings: settings, codeHash: codeHash)
+            )
+            let mergedTasks = CloudSyncReconciler.merge(
+                localTasks: viewModel.deadlines,
+                remoteTasks: try await pullTasks(settings: settings, codeHash: codeHash),
+                deletedIDs: deletedIDs
+            )
             try await upsertTasks(settings: settings, codeHash: codeHash, tasks: mergedTasks)
             viewModel.replaceTasksAfterCloudSync(mergedTasks, silent: silent)
             if !silent {
@@ -222,6 +225,15 @@ final class NativeCloudSyncController: ObservableObject {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response: response, data: data)
         return try JSONDecoder().decode([DeadlineTaskRow].self, from: data).map(\.task)
+    }
+
+    private func pullDeletedTaskIDs(settings: SyncSettings, codeHash: String) async throws -> Set<String> {
+        let request = try makeRequest(settings: settings, rpcName: "deadline_sync_pull_deleted", body: [
+            "p_sync_code_hash": codeHash
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response: response, data: data)
+        return Set(try JSONDecoder().decode([DeletedTaskRow].self, from: data).map(\.task_id))
     }
 
     private func upsertTasks(settings: SyncSettings, codeHash: String, tasks: [DeadlineTask]) async throws {
@@ -281,29 +293,6 @@ final class NativeCloudSyncController: ObservableObject {
         }
     }
 
-    private func merge(localTasks: [DeadlineTask], remoteTasks: [DeadlineTask]) -> [DeadlineTask] {
-        var merged: [String: DeadlineTask] = [:]
-        for task in remoteTasks {
-            merged[task.id] = task
-        }
-        for task in localTasks {
-            if let remote = merged[task.id] {
-                if parsedDate(task.updatedAt) >= parsedDate(remote.updatedAt) {
-                    merged[task.id] = task
-                }
-            } else {
-                merged[task.id] = task
-            }
-        }
-        return merged.values.sorted { left, right in
-            parsedDate(left.dueAt) < parsedDate(right.dueAt)
-        }
-    }
-
-    private func parsedDate(_ value: String) -> Date {
-        ISO8601DateFormatter.deadlinePanelDate(from: value) ?? .distantPast
-    }
-
     private static func sha256(_ value: String) -> String {
         let digest = SHA256.hash(data: Data(value.trimmingCharacters(in: .whitespacesAndNewlines).utf8))
         return digest.map { String(format: "%02x", $0) }.joined()
@@ -335,6 +324,35 @@ final class NativeCloudSyncController: ObservableObject {
     }
 }
 
+enum CloudSyncReconciler {
+    static func merge(
+        localTasks: [DeadlineTask],
+        remoteTasks: [DeadlineTask],
+        deletedIDs: Set<String>
+    ) -> [DeadlineTask] {
+        var merged: [String: DeadlineTask] = [:]
+        for task in remoteTasks where !deletedIDs.contains(task.id) {
+            merged[task.id] = task
+        }
+        for task in localTasks where !deletedIDs.contains(task.id) {
+            if let remote = merged[task.id] {
+                if parsedDate(task.updatedAt) > parsedDate(remote.updatedAt) {
+                    merged[task.id] = task
+                }
+            } else {
+                merged[task.id] = task
+            }
+        }
+        return merged.values.sorted { left, right in
+            parsedDate(left.dueAt) < parsedDate(right.dueAt)
+        }
+    }
+
+    private static func parsedDate(_ value: String) -> Date {
+        ISO8601DateFormatter.deadlinePanelDate(from: value) ?? .distantPast
+    }
+}
+
 private struct SyncSettings {
     let url: String
     let anonKey: String
@@ -350,6 +368,10 @@ private enum SyncError: Error {
 private struct SyncUpsertRequest: Encodable {
     let p_sync_code_hash: String
     let p_tasks: [DeadlineTaskRow]
+}
+
+private struct DeletedTaskRow: Decodable {
+    let task_id: String
 }
 
 private struct DeadlineTaskRow: Codable {

@@ -125,9 +125,12 @@ private struct PanelFooter: View {
     var body: some View {
         let strings = NativeStrings.current
         HStack {
-            Text(strings.shownTotal(viewModel.focusDeadlines.count, viewModel.deadlines.count))
+            Text(strings.shownTotal(viewModel.focusDeadlines.count, viewModel.activeDeadlines.count))
             Spacer()
-            Text("0.6.2")
+            Text(
+                Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+                    ?? viewModel.coreVersion
+            )
         }
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)

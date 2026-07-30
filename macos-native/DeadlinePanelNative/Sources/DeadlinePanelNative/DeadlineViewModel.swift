@@ -28,6 +28,7 @@ final class DeadlineViewModel: ObservableObject {
     @Published private(set) var commandMessage: String?
     private let repository: DeadlineRepository
     let focusLimitState: DeadlineFocusLimitState
+    private(set) var activeDeadlines: [DeadlineTask] = []
     private(set) var completedDeadlines: [DeadlineTask] = []
     private(set) var currentDeadlines: [DeadlineTask] = []
     var onTasksUpserted: (([DeadlineTask]) -> Void)?
@@ -54,11 +55,7 @@ final class DeadlineViewModel: ObservableObject {
     }
 
     var focusDeadlines: [DeadlineTask] {
-        Array(
-            deadlines
-                .filter { $0.status != "completed" }
-                .prefix(focusLimit)
-        )
+        Array(activeDeadlines.prefix(focusLimit))
     }
 
     func parseQuickDeadline(_ rawText: String) -> NewDeadlineInput? {
@@ -382,6 +379,7 @@ final class DeadlineViewModel: ObservableObject {
     }
 
     private func applyDeadlines(_ nextDeadlines: [DeadlineTask]) {
+        activeDeadlines = nextDeadlines.filter { $0.status != "completed" }
         completedDeadlines = nextDeadlines
             .filter { $0.status == "completed" }
             .sorted { left, right in
@@ -394,8 +392,8 @@ final class DeadlineViewModel: ObservableObject {
                 return leftDate > rightDate
             }
         currentDeadlines = Array(
-            nextDeadlines
-                .filter { $0.status != "completed" && $0.isCurrent }
+            activeDeadlines
+                .filter(\.isCurrent)
                 .prefix(2)
         )
         deadlines = nextDeadlines

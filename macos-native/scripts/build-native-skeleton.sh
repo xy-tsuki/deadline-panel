@@ -6,7 +6,7 @@ RUST_RELEASE_DIR="$ROOT_DIR/crates/deadline-core/target/release"
 BUILD_DIR="$ROOT_DIR/macos-native/.build/native"
 MODULE_CACHE_DIR="$ROOT_DIR/macos-native/.build/module-cache"
 SOURCES_DIR="$ROOT_DIR/macos-native/DeadlinePanelNative/Sources/DeadlinePanelNative"
-APP_DIR="$BUILD_DIR/Deadline Panel Native.app"
+APP_DIR="$BUILD_DIR/Deadline Panel.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 FRAMEWORKS_DIR="$CONTENTS_DIR/Frameworks"
@@ -26,6 +26,7 @@ xcrun swiftc \
   "$SOURCES_DIR/DeadlineModels.swift" \
   "$SOURCES_DIR/DateFormatting.swift" \
   "$SOURCES_DIR/NativeLocalization.swift" \
+  "$SOURCES_DIR/NativePreferenceMigration.swift" \
   "$SOURCES_DIR/NativeAppearance.swift" \
   "$SOURCES_DIR/GlassComponents.swift" \
   "$SOURCES_DIR/RustCoreClient.swift" \

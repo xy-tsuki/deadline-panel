@@ -1,34 +1,3 @@
--- Deadline Panel 0.4.0 Supabase sync-code schema
--- Run this in the Supabase SQL editor for your project.
---
--- Security model:
--- - Users do not need email/password accounts.
--- - A long local sync code is the shared secret.
--- - The app sends only sha256(sync_code) to Supabase.
--- - Direct table access is blocked by RLS; the app uses RPC functions.
-
-create table if not exists public.deadline_sync_tasks (
-  sync_code_hash text not null,
-  task_id text not null,
-  title text not null,
-  due_at timestamptz not null,
-  priority text not null check (priority in ('low', 'medium', 'high', 'urgent')),
-  status text not null check (status in ('active', 'completed', 'postponed')),
-  notes text not null default '',
-  source text not null check (source in ('manual', 'command', 'codex', 'seed')),
-  is_current boolean not null default false,
-  created_at timestamptz not null,
-  updated_at timestamptz not null,
-  completed_at timestamptz,
-  primary key (sync_code_hash, task_id)
-);
-
-create index if not exists idx_deadline_sync_tasks_hash_status_due
-on public.deadline_sync_tasks (sync_code_hash, status, due_at);
-
-create index if not exists idx_deadline_sync_tasks_hash_updated
-on public.deadline_sync_tasks (sync_code_hash, updated_at desc);
-
 create table if not exists public.deadline_sync_tombstones (
   sync_code_hash text not null,
   task_id text not null,
@@ -39,10 +8,7 @@ create table if not exists public.deadline_sync_tombstones (
 create index if not exists idx_deadline_sync_tombstones_hash_deleted
 on public.deadline_sync_tombstones (sync_code_hash, deleted_at desc);
 
-alter table public.deadline_sync_tasks enable row level security;
 alter table public.deadline_sync_tombstones enable row level security;
-
-revoke all on public.deadline_sync_tasks from anon, authenticated;
 revoke all on public.deadline_sync_tombstones from anon, authenticated;
 
 create or replace function public.deadline_sync_pull(p_sync_code_hash text)

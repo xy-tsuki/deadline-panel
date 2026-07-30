@@ -18,11 +18,14 @@ struct DeadlineViewModelCacheTests {
 
         #expect(viewModel.completedDeadlines.map { $0.id } == ["completed-new", "completed-old"])
         #expect(viewModel.currentDeadlines.map { $0.id } == ["current-1", "current-2"])
+        #expect(viewModel.activeDeadlines.map(\.id) == ["current-1", "current-2", "current-3"])
+        #expect(viewModel.focusDeadlines.count == 3)
 
         viewModel.focusLimit = 10
 
         #expect(viewModel.completedDeadlines.map { $0.id } == ["completed-new", "completed-old"])
         #expect(viewModel.currentDeadlines.map { $0.id } == ["current-1", "current-2"])
+        #expect(viewModel.focusDeadlines.count == 3)
     }
 
     private static func task(

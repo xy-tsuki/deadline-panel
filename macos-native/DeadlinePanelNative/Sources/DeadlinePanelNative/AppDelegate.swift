@@ -2,12 +2,17 @@ import AppKit
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let viewModel = DeadlineViewModel()
+    private lazy var viewModel = DeadlineViewModel()
     private let notificationController = NativeNotificationController()
     private lazy var cloudSyncController = NativeCloudSyncController(viewModel: viewModel)
     private var panelCoordinator: NativePanelCoordinator?
     private var menuBarController: NativeMenuBarController?
     private var fullscreenMonitor: NativeFullscreenMonitor?
+
+    override init() {
+        NativePreferenceMigration.migrateExperimentalBundleDefaultsIfNeeded()
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)

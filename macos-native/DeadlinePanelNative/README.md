@@ -1,26 +1,31 @@
 # Deadline Panel Native
 
-Native macOS 0.6.2 rewrite experiment.
+Deadline Panel 的原生 macOS 应用，使用 SwiftUI、AppKit 与 Rust Core。
 
-This package contains the SwiftUI/AppKit shell. The app links to the Rust core
-crate at `../../crates/deadline-core`.
+最低支持 macOS 14，macOS 26 上使用 Liquid Glass。
 
-Open this directory in Xcode to inspect and edit the Swift package:
+在 Xcode 中打开 Swift Package：
 
 ```bash
 open macos-native/DeadlinePanelNative/Package.swift
 ```
 
-For now, final app bundling is handled by:
+生成本地 `.app`：
 
 ```bash
-macos-native/scripts/build-native-skeleton.sh
+bash macos-native/scripts/build-native-skeleton.sh
 ```
 
-The build script:
+生成发布 DMG 与 SHA-256：
 
-1. Builds the Rust core release dylib.
-2. Compiles the SwiftUI/AppKit executable.
-3. Creates `Deadline Panel Native.app`.
-4. Copies `libdeadline_core.dylib` into `Contents/Frameworks`.
-5. Rewrites dynamic library paths to use `@rpath`.
+```bash
+macos-native/scripts/package-macos-release.sh
+```
+
+未设置签名参数时会生成 ad-hoc 签名包。正式分发时使用：
+
+```bash
+SIGN_IDENTITY="Developer ID Application: ..." \
+NOTARY_PROFILE="deadline-panel-notary" \
+macos-native/scripts/package-macos-release.sh
+```
