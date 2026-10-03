@@ -1,9 +1,23 @@
+import { NotificationSettings } from "./NotificationSettings";
+import { SettingsChrome } from "./SettingsChrome";
+import { LiquidTextSegments } from "./LiquidTextSegments";
+import { installMotionTokens } from "./motion";
+import { useMinuteClock } from "./useMinuteClock";
+import { hasPendingPanelInteraction } from "./panelInteraction";
+import { JsonFileControls } from "./JsonFileControls";
+import { ToolDisclosure, useToolDisclosure } from "./ToolDisclosure";
+import { TopNSegments } from "./TopNSegments";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { listenForSyncRequests } from "./sync/owner";
+import { listen } from "@tauri-apps/api/event";
 import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Check,
-  ChevronRight,
+  CalendarClock,
+  ChevronDown,
+  ChevronUp,
   Cloud,
   Clock3,
   Copy,
@@ -18,8 +32,6 @@ import {
   Settings,
   Star,
   Trash2,
-  Upload,
-  Download
 } from "lucide-react";
 import { parseCommand } from "./domain/commandParser";
 import { parseQuickAdd } from "./domain/quickAddParser";
@@ -27,22 +39,25 @@ import { formatDue, formatTimeLeft, fromDateTimeLocalValue, toDateTimeLocalValue
 import { getCurrentTasks, getNearestDeadline, sortDeadlineTasks } from "./domain/taskSorting";
 import { DeadlineTask, NewTaskInput, TaskPriority, priorityLabel } from "./domain/task";
 import { FocusLimit, selectFocusTasks, useDeadlineStore } from "./store/deadlineStore";
-import { getImportPrompt, getStrings, languageName, languageOptions, resolveLanguage } from "./i18n";
+import { getImportPrompt, getStrings, languageName, languageOptions, resolveLanguage, setNativeSystemLanguage } from "./i18n";
 import {
   getAutostartEnabled,
+  getSystemLanguage,
+  setWindowMaterial,
   backupDatabase,
-  getDataFilePath,
   getPanelPointerState,
   hidePanelTemporarily,
   hidePanelForMinutes,
   isForegroundWindowFullscreen,
   isTauriRuntime,
   openDataDir,
+  openSettingsWindow,
   resetPanelPosition,
   setAutostartEnabled,
   setPanelAutoHidden,
   setPanelExpanded as setNativePanelExpanded,
   showPanelContextMenu,
+  showPanel,
   startPanelDrag
 } from "./runtime/tauri";
 import {
@@ -54,7 +69,6 @@ import {
 import { APP_VERSION } from "./version";
 
 const priorityOptions: TaskPriority[] = ["urgent", "high", "medium", "low"];
-const focusLimitOptions: FocusLimit[] = [3, 5, 10];
 const COLLAPSE_DELAY_MS = 220;
 const COLLAPSE_ANIMATION_MS = 210;
 const FULLSCREEN_CHECK_INTERVAL_MS = 1200;
@@ -121,24 +135,79 @@ export function App() {
   const isDraggingPanelRef = useRef(false);
   const cloudSyncInFlightRef = useRef(false);
   const lastCloudSyncAtRef = useRef(0);
-  const windowRole = new URLSearchParams(window.location.search).get("window") === "panel" ? "panel" : "strip";
-  const isPanelWindow = windowRole === "panel";
+  const requestedRole = new URLSearchParams(window.location.search).get("window");
+  const windowRole = requestedRole === "settings" ? "settings" : requestedRole === "panel" ? "panel" : "strip";
+  const isPanelWindow = windowRole !== "strip";
+  const appearance = useDeadlineStore((state) => state.appearance);
   const tasks = useDeadlineStore((state) => state.tasks);
   const focusLimit = useDeadlineStore((state) => state.focusLimit);
   const isLoading = useDeadlineStore((state) => state.isLoading);
-  const error = useDeadlineStore((state) => state.error);
+  const taskError = useDeadlineStore((state) => state.error);
+  const notificationError = useDeadlineStore((state) => state.notificationError);
+  const error = [taskError, notificationError].filter(Boolean).join("\n") || null;
   const commandMessage = useDeadlineStore((state) => state.commandMessage);
   const clearCommandMessage = useDeadlineStore((state) => state.clearCommandMessage);
   const load = useDeadlineStore((state) => state.load);
   const syncWithCloud = useDeadlineStore((state) => state.syncWithCloud);
+
+  useEffect(() => {
+    installMotionTokens();
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme = appearance.theme === "system" ? (media.matches ? "dark" : "light") : appearance.theme;
+      document.documentElement.dataset.lowPower = String(appearance.lowPowerMode);
+      if (isTauriRuntime()) {
+        const theme = document.documentElement.dataset.theme;
+        void setWindowMaterial(theme === "dark").then(mode => {
+          if (document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = mode;
+        }).catch(error => { if (document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = "compatibility"; console.error("Desktop material request failed", error); });
+      }
+    };
+    apply(); media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [appearance.theme, appearance.lowPowerMode]);
+
+  useEffect(() => {
+    const pointer = () => { document.documentElement.dataset.input = "pointer"; };
+    const keyboard = () => { document.documentElement.dataset.input = "keyboard"; };
+    document.addEventListener("pointerdown", pointer, true);
+    document.addEventListener("keydown", keyboard, true);
+    return () => { document.removeEventListener("pointerdown", pointer, true); document.removeEventListener("keydown", keyboard, true); };
+  }, []);
 
   const focusTasks = useMemo(() => selectFocusTasks(tasks, focusLimit), [focusLimit, tasks]);
   const nearest = useMemo(() => getNearestDeadline(tasks), [tasks]);
   const currentTasks = useMemo(() => getCurrentTasks(tasks), [tasks]);
 
   useEffect(() => {
-    void load();
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    let unlistenNotifications: (() => void) | undefined;
+    async function initialize() {
+      if (isTauriRuntime()) {
+        const stop = await listen<number>("deadline-state-changed", () => void load({ silent: true }));
+        if (disposed) { stop(); return; }
+        unlisten = stop;
+        const stopNotifications = await listen<string>("deadline-notification-error", ({ payload }) => useDeadlineStore.setState({ notificationError: payload || null }));
+        if (disposed) { stopNotifications(); return; }
+        unlistenNotifications = stopNotifications;
+        setNativeSystemLanguage(await getSystemLanguage().catch(() => ""));
+      }
+      if (!disposed) await load();
+    }
+    void initialize();
+    return () => { disposed = true; unlisten?.(); unlistenNotifications?.(); };
   }, [load]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || isPanelWindow) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listenForSyncRequests((silent) => syncWithCloud({ silent })).then((unlisten) => {
+      if (disposed) unlisten(); else stop = unlisten;
+    });
+    return () => { disposed = true; stop?.(); };
+  }, [isPanelWindow, syncWithCloud]);
 
   async function runSilentCloudSync(minIntervalMs = 0) {
     const now = Date.now();
@@ -148,14 +217,17 @@ export function App() {
     cloudSyncInFlightRef.current = true;
     lastCloudSyncAtRef.current = now;
     try {
-      await syncWithCloud({ silent: true });
+      const settings = await loadSupabaseSyncSettings();
+      if (settings.url && settings.anonKey && settings.syncCode) await syncWithCloud({ silent: true });
+    } catch {
+      // The store keeps the failure; the next scheduled attempt may retry.
     } finally {
       cloudSyncInFlightRef.current = false;
     }
   }
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || isPanelWindow) return;
 
     let isMounted = true;
 
@@ -172,7 +244,7 @@ export function App() {
       window.clearTimeout(startupTimer);
       window.clearInterval(interval);
     };
-  }, [isLoading, syncWithCloud]);
+  }, [isLoading, isPanelWindow, syncWithCloud]);
 
   useEffect(() => {
     if (!commandMessage) return;
@@ -199,7 +271,12 @@ export function App() {
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
-    if (isPanelWindow) return;
+    if (isPanelWindow || isLoading) return;
+    if (!appearance.fullscreenAutoHide) {
+      lastAutoHiddenRef.current = false;
+      void setPanelAutoHidden(false);
+      return;
+    }
 
     let isMounted = true;
     async function syncFullscreenState() {
@@ -226,14 +303,8 @@ export function App() {
       isMounted = false;
       window.clearInterval(interval);
     };
-  }, [isPanelWindow]);
+  }, [isPanelWindow, isLoading, appearance.fullscreenAutoHide]);
 
-  useEffect(() => {
-    if (!isTauriRuntime() || isPanelWindow) return;
-
-    const interval = window.setInterval(() => void load({ silent: true }), 5000);
-    return () => window.clearInterval(interval);
-  }, [isPanelWindow, load]);
 
   function clearAnimationTimer() {
     if (animationTimerRef.current !== null) {
@@ -265,6 +336,8 @@ export function App() {
   }
 
   async function collapseIfPointerOutsideWindow() {
+    if (hasPendingPanelInteraction()) { scheduleCollapseWhenPointerLeavesWindow(); return; }
+    if (document.activeElement instanceof HTMLElement && document.activeElement.matches("input, textarea, select, [contenteditable=true]")) return;
     if (isTauriRuntime()) {
       try {
         const state = await getPanelPointerState();
@@ -394,6 +467,15 @@ export function App() {
     }
   }
 
+  if (windowRole === "settings") {
+    return <main className="settings-window">
+      <h1>Deadline Panel</h1>
+      {error ? <p className="error-message" role="alert">{error}</p> : null}
+      <SettingsChrome />
+      <SettingsPanel standalone />
+    </main>;
+  }
+
   if (isPanelWindow) {
     return (
       <main className="desktop-stage desktop-stage--panel">
@@ -401,6 +483,8 @@ export function App() {
           className={["panel-window", expandDirection === "down" ? "panel-window--open-down" : ""].filter(Boolean).join(" ")}
           onPointerEnter={handlePanelPointerEnter}
           onPointerLeave={handlePanelPointerLeave}
+          onFocusCapture={clearCollapseTimer}
+          onBlurCapture={() => scheduleCollapseWhenPointerLeavesWindow()}
           onContextMenu={handlePanelContextMenu}
           aria-label="Deadline Panel"
         >
@@ -428,7 +512,7 @@ export function App() {
       >
         <CollapsedStrip
           currentTasks={currentTasks}
-          total={focusTasks.length}
+          total={focusLimit}
           nearest={nearest}
           isLoading={isLoading}
           onStartDrag={(event) => void handleCollapsedDragStart(event)}
@@ -451,21 +535,22 @@ function CollapsedStrip({
   isLoading: boolean;
   onStartDrag: (event: PointerEvent<HTMLElement>) => void;
 }) {
+  const now = useMinuteClock();
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const summary = isLoading
     ? ui.panel.restoring
     : currentTasks.length > 0
-      ? `${ui.panel.currentPrefix}${currentTasks.map((task) => task.title).join(" + ")}｜${formatTimeLeft(currentTasks[0].dueAt, new Date(), language)}`
+      ? `${ui.panel.currentPrefix} | ${currentTasks.map((task) => task.title).join(" + ")}（${formatTimeLeft(currentTasks[0].dueAt, new Date(now), language)}）`
       : nearest
-        ? `Top ${total}｜${ui.panel.nearestPrefix}${nearest.title}（${formatTimeLeft(nearest.dueAt, new Date(), language)}）`
+        ? `Top ${total} | ${nearest.title}（${formatTimeLeft(nearest.dueAt, new Date(now), language)}）`
         : ui.panel.emptyCollapsed;
 
   return (
     <div className="collapsed-strip" onPointerDown={onStartDrag}>
       <Clock3 aria-hidden="true" />
       <span>{summary}</span>
-      <ChevronRight aria-hidden="true" />
+      <ChevronUp aria-hidden="true" />
     </div>
   );
 }
@@ -485,6 +570,7 @@ function ExpandedPanel({
   message: string | null;
   onHideTemporarily: () => void;
 }) {
+  const now = useMinuteClock();
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const firstReminder = currentTasks[0] ?? focusTasks[0];
@@ -506,7 +592,7 @@ function ExpandedPanel({
             <h1>{firstReminder.title}</h1>
             <div className="focus-meta">
               <span>{currentTasks.length > 0 ? ui.panel.currentTask : ui.panel.nearestDeadline}</span>
-              <span>{formatTimeLeft(firstReminder.dueAt, new Date(), language)}</span>
+              <span>{formatTimeLeft(firstReminder.dueAt, new Date(now), language)}</span>
               <span className={`priority-pill priority-pill--${firstReminder.priority}`}>{priorityLabel[firstReminder.priority]}</span>
             </div>
             {currentTasks.length > 1 ? (
@@ -530,11 +616,11 @@ function ExpandedPanel({
         <TaskList tasks={focusTasks} />
       </section>
 
-      <TaskComposer />
+      <ToolDisclosure><TaskComposer />
       <HistoryPanel />
       <CloudSyncPanel />
       <SettingsPanel />
-      <ImportPanel />
+      <ImportPanel /></ToolDisclosure>
     </div>
   );
 }
@@ -544,20 +630,7 @@ function FocusLimitControl({ selected }: { selected: FocusLimit }) {
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
 
-  return (
-    <div className="segmented-control" aria-label={ui.focus.countLabel}>
-      {focusLimitOptions.map((limit) => (
-        <button
-          key={limit}
-          type="button"
-          className={selected === limit ? "segmented-control__button segmented-control__button--active" : "segmented-control__button"}
-          onClick={() => void setFocusLimit(limit)}
-        >
-          Top {limit}
-        </button>
-      ))}
-    </div>
-  );
+  return <TopNSegments value={selected} label={ui.focus.countLabel} onChange={setFocusLimit} />;
 }
 
 function TaskList({ tasks }: { tasks: DeadlineTask[] }) {
@@ -577,17 +650,24 @@ function TaskList({ tasks }: { tasks: DeadlineTask[] }) {
   );
 }
 
-function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
+function TaskRow({ task, index }: { task: DeadlineTask; index?: number }) {
+  const now = useMinuteClock();
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const updateTask = useDeadlineStore((state) => state.updateTask);
   const completeTask = useDeadlineStore((state) => state.completeTask);
+  const restoreTask = useDeadlineStore((state) => state.restoreTask);
+  const completed = task.status === "completed";
   const postponeTask = useDeadlineStore((state) => state.postponeTask);
   const toggleCurrentTask = useDeadlineStore((state) => state.toggleCurrentTask);
   const deleteTask = useDeadlineStore((state) => state.deleteTask);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [isEditingDue, setIsEditingDue] = useState(false);
   const [draftTitle, setDraftTitle] = useState(task.title);
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [draftNotes, setDraftNotes] = useState(task.notes);
+  const editBusyRef = useRef(false);
+  const editCancelledRef = useRef(false);
   const [draftDue, setDraftDue] = useState(() => toDateTimeLocalValue(task.dueAt));
   const [postponeMode, setPostponeMode] = useState<"closed" | "menu" | "custom">("closed");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
@@ -595,53 +675,75 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
   const compactNotes = task.notes.trim();
 
   useEffect(() => {
-    setDraftTitle(task.title);
-  }, [task.title]);
+    if (!isEditingTitle) setDraftTitle(task.title);
+  }, [task.title, isEditingTitle]);
 
   useEffect(() => {
-    setDraftDue(toDateTimeLocalValue(task.dueAt));
+    if (!isEditingDue) setDraftDue(toDateTimeLocalValue(task.dueAt));
     setCustomDue(toDateTimeLocalValue(addDays(task.dueAt, 1)));
-  }, [task.dueAt]);
+  }, [task.dueAt, isEditingDue]);
+
+  useEffect(() => { if (!isEditingNotes) setDraftNotes(task.notes); }, [task.notes, isEditingNotes]);
+
+  async function commitNotes() {
+    if (editBusyRef.current || editCancelledRef.current) return;
+    editBusyRef.current = true;
+    try {
+      const notes = draftNotes.trim();
+      if (notes !== task.notes && !await updateTask(task.id, { notes })) return;
+      setIsEditingNotes(false);
+    } finally { editBusyRef.current = false; }
+  }
 
   async function commitTitle() {
+    if (editBusyRef.current || editCancelledRef.current) return;
+    editBusyRef.current = true;
+    try {
     const title = draftTitle.trim();
-    setIsEditingTitle(false);
     if (!title) {
       setDraftTitle(task.title);
       return;
     }
     if (title !== task.title) {
-      await updateTask(task.id, { title });
+      if (!await updateTask(task.id, { title })) return;
     }
+    setIsEditingTitle(false);
+    } catch (error) { useDeadlineStore.setState({ error: String(error) }); }
+    finally { editBusyRef.current = false; }
   }
 
   async function commitDue() {
-    setIsEditingDue(false);
+    if (editBusyRef.current || editCancelledRef.current) return;
+    editBusyRef.current = true;
+    try {
     if (!draftDue) {
       setDraftDue(toDateTimeLocalValue(task.dueAt));
       return;
     }
     const dueAt = fromDateTimeLocalValue(draftDue);
     if (dueAt !== task.dueAt) {
-      await updateTask(task.id, { dueAt });
+      if (!await updateTask(task.id, { dueAt })) return;
     }
+    setIsEditingDue(false);
+    } catch (error) { useDeadlineStore.setState({ error: String(error) }); }
+    finally { editBusyRef.current = false; }
   }
 
   async function handlePostpone(dueAt: string) {
-    await postponeTask(task.id, dueAt);
+    if (!await postponeTask(task.id, dueAt)) return;
     setPostponeMode("closed");
   }
 
   async function handlePriorityChange(priority: TaskPriority) {
-    setPriorityMenuOpen(false);
     if (priority !== task.priority) {
-      await updateTask(task.id, { priority });
+      if (!await updateTask(task.id, { priority })) return;
     }
+    setPriorityMenuOpen(false);
   }
 
   return (
     <li className={`task-row task-row--${task.priority} task-row--due-${getDueTone(task.dueAt)} ${task.isCurrent ? "task-row--current" : ""}`}>
-      <span className="task-index">{index}</span>
+      <span className="task-index">{index ?? <Check aria-hidden="true" size={13}/>}</span>
       <div className="task-copy">
         {isEditingTitle ? (
           <input
@@ -651,15 +753,16 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
             onChange={(event) => setDraftTitle(event.target.value)}
             onBlur={() => void commitTitle()}
             onKeyDown={(event) => {
-              if (event.key === "Enter") void commitTitle();
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) void commitTitle();
               if (event.key === "Escape") {
+                editCancelledRef.current = true;
                 setDraftTitle(task.title);
                 setIsEditingTitle(false);
               }
             }}
           />
         ) : (
-          <button type="button" className="task-title task-title-button" onClick={() => setIsEditingTitle(true)}>
+          <button type="button" className="task-title task-title-button" onClick={() => { editCancelledRef.current = false; setIsEditingTitle(true); }}>
             {task.title}
           </button>
         )}
@@ -673,31 +776,35 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
             onChange={(event) => setDraftDue(event.target.value)}
             onBlur={() => void commitDue()}
             onKeyDown={(event) => {
-              if (event.key === "Enter") void commitDue();
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) void commitDue();
               if (event.key === "Escape") {
+                editCancelledRef.current = true;
                 setDraftDue(toDateTimeLocalValue(task.dueAt));
                 setIsEditingDue(false);
               }
             }}
           />
         ) : (
-          <button type="button" className="task-due task-due-button" onClick={() => setIsEditingDue(true)}>
+          <button type="button" className="task-due task-due-button" onClick={() => { editCancelledRef.current = false; setIsEditingDue(true); }}>
             {ui.task.due}
             {formatDue(task.dueAt, language)}
           </button>
         )}
-        {compactNotes ? (
-          <p className="task-note" title={compactNotes}>
-            {compactNotes}
-          </p>
-        ) : null}
+        {isEditingNotes ? <input className="inline-edit task-note" autoFocus aria-label={ui.import.notes} value={draftNotes}
+          onChange={(event) => setDraftNotes(event.target.value)} onBlur={() => void commitNotes()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) void commitNotes();
+            if (event.key === "Escape") { editCancelledRef.current = true; setDraftNotes(task.notes); setIsEditingNotes(false); }
+          }} /> : <button type="button" className="task-note task-note-button" title={compactNotes || ui.import.notes}
+          onClick={() => { editCancelledRef.current = false; setIsEditingNotes(true); }}>{compactNotes || ui.import.notes}</button>}
       </div>
       <div className="task-side">
-        <span>{formatTimeLeft(task.dueAt, new Date(), language)}</span>
+        <span>{formatTimeLeft(task.dueAt, new Date(now), language)}</span>
         <div className="priority-control">
           <button
             type="button"
             className={`priority-pill priority-pill--${task.priority}`}
+            disabled={completed}
             onClick={() => setPriorityMenuOpen((value) => !value)}
           >
             {priorityLabel[task.priority]}
@@ -720,24 +827,28 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
         <span className="task-status">{ui.status[task.status]}</span>
       </div>
       <div className="task-actions" aria-label={`${task.title} ${ui.common.actions}`}>
-        <button
+        {!completed ? <button
           type="button"
           className={`icon-button ${task.isCurrent ? "icon-button--active" : ""}`}
           title={task.isCurrent ? ui.common.cancelCurrent : ui.common.setCurrent}
           onClick={() => void toggleCurrentTask(task.id)}
         >
           <Star aria-hidden="true" />
+        </button> : null}
+        <button type="button" className="icon-button" title={completed ? ui.common.restore : ui.common.complete} onClick={() => void (completed ? restoreTask(task.id) : completeTask(task.id))}>
+          {completed ? <RotateCcw aria-hidden="true" /> : <Check aria-hidden="true" />}
         </button>
-        <button type="button" className="icon-button" title={ui.common.complete} onClick={() => void completeTask(task.id)}>
-          <Check aria-hidden="true" />
+        <button type="button" className="icon-button" title={ui.common.delete} onClick={() => void deleteTask(task.id)}>
+          <Trash2 aria-hidden="true" />
         </button>
-        <div className="postpone-control">
+        {!completed ? <div className="postpone-control">
           <button
             type="button"
             className="text-button"
+            aria-expanded={postponeMode !== "closed"}
             onClick={() => setPostponeMode((value) => (value === "closed" ? "menu" : "closed"))}
           >
-            {ui.task.postponed}
+            <CalendarClock aria-hidden="true" />{ui.task.postponed}<ChevronDown aria-hidden="true" />
           </button>
           {postponeMode !== "closed" ? (
             <div className="postpone-menu">
@@ -766,26 +877,31 @@ function TaskRow({ task, index }: { task: DeadlineTask; index: number }) {
               )}
             </div>
           ) : null}
-        </div>
-        <button type="button" className="icon-button" title={ui.common.delete} onClick={() => void deleteTask(task.id)}>
-          <Trash2 aria-hidden="true" />
-        </button>
+        </div> : null}
       </div>
     </li>
   );
+}
+
+function scrollPanelToTop() {
+  const panel = document.querySelector(".expanded-panel, .settings-window");
+  panel?.scrollTo({ top: 0, behavior: document.documentElement.dataset.lowPower === "true" ? "auto" : "smooth" });
 }
 
 function TaskComposer() {
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const addTask = useDeadlineStore((state) => state.addTask);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useToolDisclosure("add");
   const [quickInput, setQuickInput] = useState("");
   const [quickPreview, setQuickPreview] = useState<NewTaskInput | null>(null);
   const [quickMessage, setQuickMessage] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
   const [dueAt, setDueAt] = useState(() => toDateTimeLocalValue(new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString()));
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [isSaving, setIsSaving] = useState(false);
+  const saving = useRef(false);
 
   function handleQuickParse() {
     const result = parseQuickAdd(quickInput);
@@ -800,28 +916,37 @@ function TaskComposer() {
   }
 
   async function handleQuickConfirm() {
-    if (!quickPreview) return;
-
-    await addTask(quickPreview);
+    if (!quickPreview || saving.current) return;
+    saving.current = true; setIsSaving(true);
+    try {
+    if (!await addTask(quickPreview)) return;
     setQuickInput("");
     setQuickPreview(null);
     setQuickMessage(null);
     setIsOpen(false);
+    scrollPanelToTop();
+    } finally { saving.current = false; setIsSaving(false); }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!title.trim() || !dueAt) return;
-
-    await addTask({
+    if (!title.trim() || !dueAt || saving.current) return;
+    saving.current = true; setIsSaving(true);
+    try {
+    const added = await addTask({
       title,
       dueAt: fromDateTimeLocalValue(dueAt),
       priority,
+      notes,
       source: "manual"
     });
+    if (!added) return;
     setTitle("");
+    setNotes("");
     setPriority("medium");
     setIsOpen(false);
+    scrollPanelToTop();
+    } finally { saving.current = false; setIsSaving(false); }
   }
 
   return (
@@ -862,7 +987,7 @@ function TaskComposer() {
                   {formatDue(quickPreview.dueAt, language)} · {priorityLabel[quickPreview.priority]}
                 </span>
               </div>
-              <button type="button" className="primary-button" onClick={() => void handleQuickConfirm()}>
+              <button type="button" className="primary-button" disabled={isSaving} onClick={() => void handleQuickConfirm()}>
                 {ui.add.quickConfirm}
               </button>
             </div>
@@ -889,7 +1014,8 @@ function TaskComposer() {
               ))}
             </select>
           </label>
-          <button type="submit" className="primary-button">
+          <label><span>{ui.import.notes}</span><input value={notes} onChange={event => setNotes(event.target.value)}/></label>
+          <button type="submit" className="primary-button" disabled={isSaving}>
             {ui.common.save}
           </button>
           </form>
@@ -905,7 +1031,7 @@ function HistoryPanel() {
   const tasks = useDeadlineStore((state) => state.tasks);
   const restoreTask = useDeadlineStore((state) => state.restoreTask);
   const deleteTask = useDeadlineStore((state) => state.deleteTask);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useToolDisclosure("history");
   const completedTasks = useMemo(
     () =>
       [...tasks]
@@ -926,20 +1052,7 @@ function HistoryPanel() {
           {completedTasks.length === 0 ? (
             <p className="empty-text">{ui.history.empty}</p>
           ) : (
-            completedTasks.map((task) => (
-              <div className="history-row" key={task.id}>
-                <div>
-                  <p>{task.title}</p>
-                  <span>{formatDue(task.dueAt, language)}</span>
-                </div>
-                <button type="button" className="icon-button" title={ui.common.restore} onClick={() => void restoreTask(task.id)}>
-                  <RotateCcw aria-hidden="true" />
-                </button>
-                <button type="button" className="icon-button" title={ui.common.delete} onClick={() => void deleteTask(task.id)}>
-                  <Trash2 aria-hidden="true" />
-                </button>
-              </div>
-            ))
+            <ol className="task-list">{completedTasks.map(task => <TaskRow key={task.id} task={task}/>)}</ol>
           )}
         </div>
       ) : null}
@@ -951,7 +1064,7 @@ function CloudSyncPanel() {
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
   const syncWithCloud = useDeadlineStore((state) => state.syncWithCloud);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useToolDisclosure("cloud");
   const [syncUrl, setSyncUrl] = useState("");
   const [syncAnonKey, setSyncAnonKey] = useState("");
   const [syncCode, setSyncCode] = useState("");
@@ -1118,19 +1231,19 @@ function CloudSyncPanel() {
   );
 }
 
-function SettingsPanel() {
+function SettingsPanel({ standalone = false }: { standalone?: boolean }) {
   const language = useDeadlineStore((state) => state.language);
   const setLanguage = useDeadlineStore((state) => state.setLanguage);
   const ui = getStrings(language);
   const focusLimit = useDeadlineStore((state) => state.focusLimit);
   const setFocusLimit = useDeadlineStore((state) => state.setFocusLimit);
   const [isAvailable] = useState(() => isTauriRuntime());
-  const [isOpen, setIsOpen] = useState(false);
+  const isOpen = standalone;
+  const [isOpeningSettings, setIsOpeningSettings] = useState(false);
+  const openingSettings = useRef(false);
   const [isAutostartEnabled, setIsAutostartEnabled] = useState(false);
   const [isAutostartPending, setIsAutostartPending] = useState(false);
   const [isUpdatePending, setIsUpdatePending] = useState(false);
-  const [hideMenuOpen, setHideMenuOpen] = useState(false);
-  const [dataPath, setDataPath] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1145,18 +1258,10 @@ function SettingsPanel() {
         if (isMounted) setMessage(ui.settings.autostartReadFailed);
       });
 
-    void getDataFilePath()
-      .then((path) => {
-        if (isMounted) setDataPath(path);
-      })
-      .catch(() => {
-        if (isMounted) setMessage(ui.settings.dataPathReadFailed);
-      });
-
     return () => {
       isMounted = false;
     };
-  }, [isAvailable, isOpen, ui.settings.autostartReadFailed, ui.settings.dataPathReadFailed]);
+  }, [isAvailable, isOpen, ui.settings.autostartReadFailed]);
 
   useEffect(() => {
     if (!message) return;
@@ -1165,7 +1270,7 @@ function SettingsPanel() {
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  if (!isAvailable) {
+  if (!isAvailable && !standalone) {
     return null;
   }
 
@@ -1210,12 +1315,19 @@ function SettingsPanel() {
   }
 
   async function handleHideFor(minutes: number) {
-    setHideMenuOpen(false);
     try {
       await hidePanelForMinutes(minutes);
     } catch {
       setMessage(ui.settings.hideFailed);
     }
+  }
+
+  async function handleOpenSettings() {
+    if (standalone || openingSettings.current) return;
+    openingSettings.current = true; setIsOpeningSettings(true);
+    try { await openSettingsWindow(ui.settings.title); }
+    catch (error) { setMessage(String(error)); }
+    finally { openingSettings.current = false; setIsOpeningSettings(false); }
   }
 
   async function handleCheckUpdates() {
@@ -1303,30 +1415,21 @@ function SettingsPanel() {
 
   return (
     <section className="panel-section panel-section--settings">
-      <button type="button" className="add-toggle" onClick={() => setIsOpen((value) => !value)}>
+      <button type="button" className="add-toggle" disabled={isOpeningSettings} onClick={() => void handleOpenSettings()}>
         <Settings aria-hidden="true" />
         <span>{ui.settings.title}</span>
       </button>
 
+      {message && !standalone ? <p className="setting-message" role="alert">{message}</p> : null}
       {isOpen ? (
         <div className="settings-panel">
+          <div className="settings-preferences">
           <div className="settings-row">
             <div>
               <p className="setting-title">{ui.settings.focusCount}</p>
               <p className="setting-copy">{ui.settings.focusCopy}</p>
             </div>
-            <div className="segmented-control" aria-label={ui.settings.focusCount}>
-              {focusLimitOptions.map((limit) => (
-                <button
-                  key={limit}
-                  type="button"
-                  className={focusLimit === limit ? "segmented-control__button segmented-control__button--active" : "segmented-control__button"}
-                  onClick={() => void setFocusLimit(limit)}
-                >
-                  Top {limit}
-                </button>
-              ))}
-            </div>
+            <TopNSegments value={focusLimit} label={ui.settings.focusCount} onChange={setFocusLimit} />
           </div>
 
           <div className="settings-row">
@@ -1334,60 +1437,33 @@ function SettingsPanel() {
               <p className="setting-title">{ui.settings.language}</p>
               <p className="setting-copy">{ui.settings.languageCopy}</p>
             </div>
-            <div className="segmented-control segmented-control--wrap" aria-label={ui.settings.language}>
-              {languageOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={language === option ? "segmented-control__button segmented-control__button--active" : "segmented-control__button"}
-                  onClick={() => void setLanguage(option)}
-                >
-                  {languageName(option, language)}
-                </button>
-              ))}
-            </div>
+            <LiquidTextSegments value={language} label={ui.settings.language} options={languageOptions.map(value => ({ value, label: languageName(value, language) }))} onChange={setLanguage}/>
           </div>
 
-          <div className="settings-row">
-            <div>
-              <p className="setting-title">{ui.settings.autostart}</p>
-              <p className="setting-copy">{ui.settings.autostartCopy}</p>
-            </div>
-            <label className="switch" aria-label={ui.settings.autostart}>
+          <AppearanceSettings part="theme" />
+          <div className="settings-row settings-row--toggle">
+            <label className="setting-check">
               <input
                 type="checkbox"
                 checked={isAutostartEnabled}
                 disabled={isAutostartPending}
                 onChange={(event) => void handleAutostartToggle(event.target.checked)}
               />
-              <span />
+              <span>{ui.settings.autostart}</span>
             </label>
           </div>
 
+          <AppearanceSettings part="behavior" />
+          </div>
+          <div className="settings-notifications"><NotificationSettings /></div>
           <div className="settings-actions">
+            <button type="button" className="text-button" onClick={() => void showPanel().catch(error => setMessage(String(error)))}><Star aria-hidden="true"/>{({ zh: "显示面板", ja: "パネルを表示", en: "Show panel" })[resolveLanguage(language)]}</button>
+            <button type="button" className="text-button" onClick={() => void handleHideFor(15)}><EyeOff aria-hidden="true"/>{ui.settings.hide15}</button>
+            <button type="button" className="text-button" onClick={() => void handleHideFor(30)}><EyeOff aria-hidden="true"/>{ui.settings.hide30}</button>
             <button type="button" className="text-button" onClick={handleResetPosition}>
               <RotateCcw aria-hidden="true" />
               {ui.settings.resetPosition}
             </button>
-            <div className="settings-menu-control">
-              <button type="button" className="text-button" onClick={() => setHideMenuOpen((value) => !value)}>
-                <EyeOff aria-hidden="true" />
-                {ui.settings.hideTemporary}
-              </button>
-              {hideMenuOpen ? (
-                <div className="settings-submenu">
-                  <button type="button" onClick={() => void handleHideFor(15)}>
-                    {ui.settings.hide15}
-                  </button>
-                  <button type="button" onClick={() => void handleHideFor(30)}>
-                    {ui.settings.hide30}
-                  </button>
-                  <button type="button" onClick={() => void handleHideFor(60)}>
-                    {ui.settings.hide60}
-                  </button>
-                </div>
-              ) : null}
-            </div>
             <button type="button" className="text-button" onClick={handleOpenDataDir}>
               <FolderOpen aria-hidden="true" />
               {ui.settings.dataDir}
@@ -1400,9 +1476,9 @@ function SettingsPanel() {
               <RefreshCw aria-hidden="true" />
               {ui.settings.checkUpdates}
             </button>
+            <JsonFileControls />
           </div>
 
-          {dataPath ? <p className="data-path">{dataPath}</p> : null}
           {message ? <p className="setting-message">{message}</p> : null}
         </div>
       ) : null}
@@ -1474,16 +1550,16 @@ function AutostartSetting() {
 function ImportPanel() {
   const language = useDeadlineStore((state) => state.language);
   const ui = getStrings(language);
-  const tasks = useDeadlineStore((state) => state.tasks);
+
   const bulkAddTasks = useDeadlineStore((state) => state.bulkAddTasks);
-  const importTasks = useDeadlineStore((state) => state.importTasks);
+
   const runCommand = useDeadlineStore((state) => state.runCommand);
   const clearCommandMessage = useDeadlineStore((state) => state.clearCommandMessage);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useToolDisclosure("import");
   const [rawImport, setRawImport] = useState("");
   const [previewRows, setPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [localMessage, setLocalMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const importPanelRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLDivElement | null>(null);
 
@@ -1537,8 +1613,11 @@ function ImportPanel() {
 
   async function executeSingleCommand() {
     if (!rawImport.trim()) return;
-    await runCommand(rawImport.trim());
+    if (!await runCommand(rawImport.trim())) return;
     setPreviewRows([]);
+    setRawImport("");
+    setIsOpen(false);
+    scrollPanelToTop();
   }
 
   async function confirmImport() {
@@ -1557,10 +1636,12 @@ function ImportPanel() {
       return;
     }
 
-    await bulkAddTasks(inputs);
+    if (!await bulkAddTasks(inputs)) return;
     setRawImport("");
     setPreviewRows([]);
     setLocalMessage(null);
+    setIsOpen(false);
+    scrollPanelToTop();
   }
 
   function updatePreviewRow(id: string, fields: Partial<ImportPreviewRow>) {
@@ -1585,46 +1666,9 @@ function ImportPanel() {
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         const target = previewRef.current ?? importPanelRef.current;
-        target?.scrollIntoView({ block: "end", behavior: "smooth" });
+        target?.scrollIntoView({ block: "end", behavior: document.documentElement.dataset.lowPower === "true" ? "auto" : "smooth" });
       });
     });
-  }
-
-  function exportTasks() {
-    const payload = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      tasks: sortDeadlineTasks(tasks)
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `deadline-panel-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setLocalMessage(ui.import.exported);
-  }
-
-  async function importJsonFile(file: File) {
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as { tasks?: DeadlineTask[] } | DeadlineTask[];
-      const imported = Array.isArray(parsed) ? parsed : parsed.tasks;
-      if (!Array.isArray(imported)) {
-        setLocalMessage(ui.import.noTasksInJson);
-        return;
-      }
-
-      await importTasks(imported);
-      setLocalMessage(null);
-    } catch {
-      setLocalMessage(ui.import.jsonImportFailed);
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
   }
 
   return (
@@ -1638,24 +1682,7 @@ function ImportPanel() {
           <Copy aria-hidden="true" />
           {ui.import.copyPrompt}
         </button>
-        <button type="button" className="text-button" onClick={exportTasks}>
-          <Download aria-hidden="true" />
-          {ui.import.exportJson}
-        </button>
-        <button type="button" className="text-button" onClick={() => fileInputRef.current?.click()}>
-          <Upload aria-hidden="true" />
-          {ui.import.importJson}
-        </button>
-        <input
-          ref={fileInputRef}
-          className="file-input"
-          type="file"
-          accept="application/json,.json"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void importJsonFile(file);
-          }}
-        />
+        <JsonFileControls />
       </div>
 
       {isOpen ? (

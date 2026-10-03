@@ -14,8 +14,8 @@ if (process.env.TAURI_SIGNING_PRIVATE_KEY_PATH && process.env.TAURI_SIGNING_PRIV
   process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "";
 }
 
-const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-execFileSync(npx, ["tauri", "build"], {
+const tauriCliPath = path.join(rootDir, "node_modules", "@tauri-apps", "cli", "tauri.js");
+execFileSync(process.execPath, [tauriCliPath, "build"], {
   cwd: rootDir,
   env: process.env,
   stdio: "inherit"

@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+import { webcrypto } from "node:crypto";
+globalThis.crypto = webcrypto;
+async function load(file) {
+  const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
+  const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+  return import("data:text/javascript;base64," + Buffer.from(compiled).toString("base64"));
+}
+const { parseAppearance } = await load("../src/domain/appearance.ts");
+assert.deepEqual(parseAppearance(null), { theme: "system", lowPowerMode: false, fullscreenAutoHide: true });
+assert.deepEqual(parseAppearance('{"theme":"light","lowPowerMode":true,"fullscreenAutoHide":false}'), { theme: "light", lowPowerMode: true, fullscreenAutoHide: false });
+assert.equal(parseAppearance("invalid").theme, "system");
+assert.equal(parseAppearance("null").theme, "system");
+const { isValidAbsoluteTimestamp } = await load("../src/domain/timestamp.ts");
+globalThis.isValidAbsoluteTimestamp = isValidAbsoluteTimestamp;
+assert.equal(isValidAbsoluteTimestamp("2026-02-29T00:00:00Z"), false);
+assert.equal(isValidAbsoluteTimestamp("2024-02-29T00:00:00Z"), true);
+assert.equal(isValidAbsoluteTimestamp("2026-02-31T00:00:00Z"), false);
+assert.equal(isValidAbsoluteTimestamp("2026-01-01T00:00:00"), false);
+const { validateImportedTasks } = await load("../src/domain/taskImport.ts");
+const task = { id: "synthetic", title: "  中文 日本語 English  ", dueAt: "2026-12-01T00:00:00+09:00", priority: "medium", status: "active", notes: "", source: "manual", isCurrent: false, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-02-01T00:00:00Z", completedAt: null };
+assert.equal(validateImportedTasks([task])[0].updatedAt, task.updatedAt, "import preserves cloud conflict timestamp");
+assert.equal(validateImportedTasks([task])[0].title, task.title.trim());
+const legacy = { ...task }; delete legacy.createdAt; delete legacy.updatedAt;
+const imported = validateImportedTasks([legacy], "2026-03-01T00:00:00Z")[0];
+assert.equal(imported.createdAt, "2026-03-01T00:00:00Z");
+assert.equal(imported.updatedAt, imported.createdAt);
+assert.throws(() => validateImportedTasks([task, { ...task, dueAt: "invalid" }]), /#2:.*dueAt/);
+assert.throws(() => validateImportedTasks([{ ...task, dueAt: "2026-02-31T00:00:00Z" }]), /dueAt/);
+assert.throws(() => validateImportedTasks([{ ...task, priority: "invalid" }]), /priority/);
+assert.throws(() => validateImportedTasks([{ ...task, status: "invalid" }]), /status/);
+assert.throws(() => validateImportedTasks([{ ...task, updatedAt: "invalid" }]), /updatedAt/);
+const newest = { ...task, updatedAt: "2026-03-01T00:00:00Z", title: "newer" };
+assert.equal(validateImportedTasks([newest, task])[0].title, "newer");
+assert.equal(validateImportedTasks([task, { ...task, title: "last tie" }])[0].title, "last tie");
+console.log("通过：设置默认值与损坏配置回退；导入时间戳保留、旧格式缺失时间策略、逐项错误、无效枚举与重复 ID 合并。");

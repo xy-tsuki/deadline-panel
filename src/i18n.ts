@@ -11,8 +11,14 @@ const localeByLanguage: Record<ResolvedLanguage, string> = {
   en: "en-US"
 };
 
+let nativeSystemLanguage: ResolvedLanguage | null = null;
+export function setNativeSystemLanguage(language: string): void {
+  if (language === "zh" || language === "ja" || language === "en") nativeSystemLanguage = language;
+}
+
 export function resolveLanguage(language: AppLanguage): ResolvedLanguage {
   if (language !== "system") return language;
+  if (nativeSystemLanguage) return nativeSystemLanguage;
 
   const preferred = navigator.language.toLowerCase();
   if (preferred.startsWith("ja")) return "ja";

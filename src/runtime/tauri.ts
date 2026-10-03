@@ -187,3 +187,27 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
 
   return invoke<boolean>("set_autostart_enabled", { enabled });
 }
+
+export async function openSettingsWindow(title: string): Promise<void> {
+  if (isTauriRuntime()) await invoke("open_settings_window", { title });
+}
+
+export async function showPanel(): Promise<void> {
+  if (isTauriRuntime()) await invoke("show_panel");
+}
+
+export async function setWindowMaterial(dark: boolean): Promise<string> {
+  return isTauriRuntime() ? invoke<string>("set_window_material", { dark }) : "compatibility";
+}
+
+export async function settingsWindowAction(action: "hide" | "minimize" | "drag"): Promise<void> {
+  if (isTauriRuntime()) await invoke("settings_window_action", { action });
+}
+
+export async function getSystemLanguage(): Promise<string> {
+  return isTauriRuntime() ? invoke<string>("system_language") : navigator.language;
+}
+
+export async function scheduleNotifications(): Promise<number> {
+  return invoke<number>("schedule_notifications");
+}

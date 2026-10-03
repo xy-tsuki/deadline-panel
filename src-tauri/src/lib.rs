@@ -1,8 +1,14 @@
+mod notifications;
+#[cfg(windows)]
+mod material;
+#[cfg(all(windows, debug_assertions))]
+mod backdrop;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -10,8 +16,9 @@ use tauri::{
     image::Image,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    AppHandle, LogicalSize, Manager, PhysicalPosition, Size,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size,
 };
+use tauri_plugin_dialog::DialogExt;
 
 #[cfg(windows)]
 use windows::Win32::{
@@ -31,6 +38,51 @@ use windows::Win32::{
 };
 
 const PANEL_WIDTH: f64 = 372.0;
+static SETTINGS_WINDOW_CREATION: Mutex<()> = Mutex::new(());
+
+/// Desktop blur with checked native return values. System acceptance still
+/// does not prove optical equivalence to Apple's Liquid Glass.
+#[tauri::command]
+async fn set_window_material(window: tauri::WebviewWindow, dark: bool) -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let target = window.clone();
+        window.run_on_main_thread(move || {
+            // Keep native title bars and system controls in the selected theme.
+            let theme_result = target.set_theme(Some(if dark { tauri::Theme::Dark } else { tauri::Theme::Light }));
+            let result = theme_result.map_err(|error| error.to_string()).and_then(|_| material::apply(&target, dark));
+            let _ = tx.send(result);
+        }).map_err(|error| error.to_string())?;
+        let mode = rx.recv_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())??;
+        Ok(mode.into())
+    }
+    #[cfg(not(windows))]
+    { let _ = (window, dark); Ok("compatibility".into()) }
+}
+
+#[tauri::command]
+async fn export_tasks_json(app: AppHandle, state: tauri::State<'_, AppState>) -> Result<Option<String>, String> {
+    // Take a snapshot, then release the DB lock before the user opens a dialog.
+    let payload = {
+        let db = state.db.lock().map_err(|error| error.to_string())?;
+        let tasks = query_tasks(&db).map_err(|error| error.to_string())?;
+        let exported_at: String = db.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ', 'now')", [], |row| row.get(0)).map_err(|error| error.to_string())?;
+        serde_json::to_string_pretty(&serde_json::json!({ "version": 1, "exportedAt": exported_at, "tasks": tasks })).map_err(|error| error.to_string())?
+    };
+    let Some(file) = app.dialog().file().add_filter("JSON", &["json"]).set_file_name("deadline-panel.json").blocking_save_file() else { return Ok(None); };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    fs::write(&path, payload).map_err(|error| error.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+async fn read_import_json(app: AppHandle) -> Result<Option<String>, String> {
+    let Some(file) = app.dialog().file().add_filter("JSON", &["json"]).blocking_pick_file() else { return Ok(None); };
+    let path = file.into_path().map_err(|error| error.to_string())?;
+    if fs::metadata(&path).map_err(|error| error.to_string())?.len() > 8 * 1024 * 1024 { return Err("JSON exceeds the 8 MiB import limit".into()); }
+    fs::read_to_string(path).map(Some).map_err(|error| error.to_string())
+}
 const PANEL_EXPANDED_HEIGHT: f64 = 600.0;
 const PANEL_MIN_HEIGHT: f64 = 180.0;
 const PANEL_COLLAPSED_HEIGHT: f64 = 44.0;
@@ -47,6 +99,7 @@ const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion
 const AUTOSTART_REG_VALUE: &str = "Deadline Panel";
 
 struct AppState {
+    revision: AtomicU64,
     db: Mutex<Connection>,
     db_path: PathBuf,
     panel: Mutex<PanelState>,
@@ -116,9 +169,88 @@ struct PanelExpandResult {
     direction: &'static str,
 }
 
+fn broadcast_revision(app: &AppHandle, state: &AppState) {
+    let revision = state.revision.fetch_add(1, Ordering::SeqCst) + 1;
+    let _ = app.emit("deadline-state-changed", revision);
+}
+
+#[tauri::command]
+fn pending_deletes(
+    namespace: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let mut stmt = db
+        .prepare("SELECT task_id FROM pending_deletes WHERE namespace = ?1")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![namespace], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn acknowledge_delete(
+    namespace: String,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    db.execute(
+        "DELETE FROM pending_deletes WHERE namespace = ?1 AND task_id = ?2",
+        params![namespace, id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn state_revision(state: tauri::State<'_, AppState>) -> Result<u64, String> {
+    let _db = state.db.lock().map_err(|error| error.to_string())?;
+    Ok(state.revision.load(Ordering::SeqCst))
+}
+
 #[tauri::command]
 fn list_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<DeadlineTask>, String> {
     let db = state.db.lock().map_err(|error| error.to_string())?;
+    query_tasks(&db)
+}
+
+#[tauri::command]
+fn load_snapshot(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    Ok(serde_json::json!({
+        "tasks": query_tasks(&db)?,
+        "focusLimit": get_app_setting_value(&db, "focus_limit").map_err(|error| error.to_string())?,
+        "language": get_app_setting_value(&db, "app_language").map_err(|error| error.to_string())?,
+        "appearance": get_app_setting_value(&db, "appearance_preferences").map_err(|error| error.to_string())?,
+        "revision": state.revision.load(Ordering::SeqCst)
+    }))
+}
+
+#[tauri::command]
+fn get_app_settings(keys: Vec<String>, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let mut values = serde_json::Map::new();
+    for key in keys { values.insert(key.clone(), serde_json::json!(get_app_setting_value(&db, &key).map_err(|error| error.to_string())?)); }
+    Ok(values.into())
+}
+
+#[tauri::command]
+fn set_app_settings(values: std::collections::HashMap<String, String>, app: AppHandle, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    // This batch is for sync configuration; unrelated preference side effects
+    // remain on their dedicated commands.
+    if values.keys().any(|key| !matches!(key.as_str(), "sync_supabase_url" | "sync_supabase_anon_key" | "sync_code")) { return Err("Unsupported batch setting".into()); }
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    let tx = db.transaction().map_err(|error| error.to_string())?;
+    for (key, value) in values { set_app_setting_value(&tx, &key, &value).map_err(|error| error.to_string())?; }
+    tx.commit().map_err(|error| error.to_string())?;
+    broadcast_revision(&app, &state);
+    Ok(())
+}
+
+fn query_tasks(db: &Connection) -> Result<Vec<DeadlineTask>, String> {
     let mut statement = db
         .prepare(
             "SELECT id, title, due_at, priority, status, notes, source, is_current, created_at, updated_at, completed_at
@@ -156,12 +288,7 @@ fn list_tasks(state: tauri::State<'_, AppState>) -> Result<Vec<DeadlineTask>, St
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn save_task(
-    task: DeadlineTask,
-    state: tauri::State<'_, AppState>,
-) -> Result<DeadlineTask, String> {
-    let db = state.db.lock().map_err(|error| error.to_string())?;
+fn write_task(db: &Connection, task: &DeadlineTask) -> rusqlite::Result<()> {
     db.execute(
         "INSERT INTO tasks (
             id, title, due_at, priority, status, notes, source, is_current, created_at, updated_at, completed_at
@@ -190,25 +317,150 @@ fn save_task(
             &task.completed_at
         ],
     )
-    .map_err(|error| error.to_string())?;
+    ?;
 
+    Ok(())
+}
+
+fn persist_tasks(db: &mut Connection, tasks: &[DeadlineTask]) -> rusqlite::Result<()> {
+    let tx = db.transaction()?;
+    for task in tasks {
+        write_task(&tx, task)?;
+    }
+    tx.commit()
+}
+
+#[tauri::command]
+fn save_tasks(
+    tasks: Vec<DeadlineTask>,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    if tasks.is_empty() {
+        return Ok(());
+    }
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    persist_tasks(&mut db, &tasks).map_err(|error| error.to_string())?;
+    refresh_scheduled_notifications(&app, &db);
+    broadcast_revision(&app, &state);
+    Ok(())
+}
+
+fn patch_existing_task(
+    db: &Connection,
+    id: &str,
+    fields: serde_json::Value,
+) -> Result<DeadlineTask, String> {
+    let task = db.query_row("SELECT id, title, due_at, priority, status, notes, source, is_current, created_at, updated_at, completed_at FROM tasks WHERE id = ?1", params![id], |row| {
+        Ok(DeadlineTask { id: row.get(0)?, title: row.get(1)?, due_at: row.get(2)?, priority: row.get(3)?, status: row.get(4)?, notes: row.get(5)?, source: row.get(6)?, is_current: row.get::<_, i64>(7)? != 0, created_at: row.get(8)?, updated_at: row.get(9)?, completed_at: row.get(10)? })
+    }).map_err(|error| error.to_string())?;
+    let mut value = serde_json::to_value(&task).map_err(|error| error.to_string())?;
+    for (key, field) in fields.as_object().ok_or("invalid task patch")? {
+        if ![
+            "title",
+            "dueAt",
+            "priority",
+            "status",
+            "notes",
+            "source",
+            "isCurrent",
+            "completedAt",
+            "updatedAt",
+        ]
+        .contains(&key.as_str())
+        {
+            return Err(format!("unsupported task field: {key}"));
+        }
+        value[key] = field.clone();
+    }
+    let updated: DeadlineTask = serde_json::from_value(value).map_err(|error| error.to_string())?;
+    if updated.title.trim().is_empty()
+        || !["urgent", "high", "medium", "low"].contains(&updated.priority.as_str())
+        || !["active", "completed", "postponed"].contains(&updated.status.as_str())
+    {
+        return Err("invalid task fields".into());
+    }
+    if updated.is_current && updated.status != "completed" && !task.is_current {
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE is_current = 1 AND status != 'completed'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        if count >= 2 {
+            return Err("current_task_limit".into());
+        }
+    }
+    write_task(db, &updated).map_err(|error| error.to_string())?;
+    Ok(updated)
+}
+
+#[tauri::command]
+fn patch_task(
+    id: String,
+    fields: serde_json::Value,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeadlineTask, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let task = patch_existing_task(&db, &id, fields)?;
+    refresh_scheduled_notifications(&app, &db);
+    broadcast_revision(&app, &state);
     Ok(task)
 }
 
 #[tauri::command]
-fn delete_task(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+fn save_task(
+    task: DeadlineTask,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<DeadlineTask, String> {
     let db = state.db.lock().map_err(|error| error.to_string())?;
-    db.execute("DELETE FROM tasks WHERE id = ?1", params![id])
-        .map_err(|error| error.to_string())?;
+    write_task(&db, &task).map_err(|error| error.to_string())?;
+    refresh_scheduled_notifications(&app, &db);
+    broadcast_revision(&app, &state);
+    Ok(task)
+}
+
+fn persist_delete(db: &mut Connection, id: &str, namespace: Option<&str>) -> rusqlite::Result<()> {
+    let tx = db.transaction()?;
+    if let Some(namespace) = namespace {
+        tx.execute(
+            "INSERT OR IGNORE INTO pending_deletes(namespace, task_id) VALUES (?1, ?2)",
+            params![namespace, &id],
+        )?;
+    }
+    tx.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_task(
+    id: String,
+    namespace: Option<String>,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    persist_delete(&mut db, &id, namespace.as_deref()).map_err(|error| error.to_string())?;
+    refresh_scheduled_notifications(&app, &db);
+    broadcast_revision(&app, &state);
     Ok(())
 }
 
 #[tauri::command]
 fn replace_tasks(
     tasks: Vec<DeadlineTask>,
+    expected_revision: Option<u64>,
+    app: AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let mut db = state.db.lock().map_err(|error| error.to_string())?;
+    if expected_revision.is_some_and(|revision| revision != state.revision.load(Ordering::SeqCst)) {
+        return Err("revision_conflict".into());
+    }
     let tx = db.transaction().map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM tasks", [])
         .map_err(|error| error.to_string())?;
@@ -235,7 +487,10 @@ fn replace_tasks(
         .map_err(|error| error.to_string())?;
     }
 
-    tx.commit().map_err(|error| error.to_string())
+    tx.commit().map_err(|error| error.to_string())?;
+    refresh_scheduled_notifications(&app, &db);
+    broadcast_revision(&app, &state);
+    Ok(())
 }
 
 #[tauri::command]
@@ -254,6 +509,42 @@ fn get_app_setting(
     Ok(value)
 }
 
+fn merge_appearance_preferences(
+    db: &Connection,
+    changes: serde_json::Value,
+) -> Result<String, String> {
+    let stored =
+        get_app_setting_value(db, "appearance_preferences").map_err(|error| error.to_string())?;
+    let mut current = stored
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        .filter(|value| value.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    for (key, value) in changes.as_object().ok_or("invalid preferences")? {
+        match key.as_str() {
+            "theme" if matches!(value.as_str(), Some("system" | "light" | "dark")) => {}
+            "lowPowerMode" | "fullscreenAutoHide" if value.is_boolean() => {}
+            _ => return Err("invalid appearance preference".into()),
+        }
+        current[key] = value.clone();
+    }
+    let value = current.to_string();
+    set_app_setting_value(db, "appearance_preferences", &value)
+        .map_err(|error| error.to_string())?;
+    Ok(value)
+}
+
+#[tauri::command]
+fn set_appearance_preferences(
+    changes: serde_json::Value,
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    let value = merge_appearance_preferences(&db, changes)?;
+    broadcast_revision(&app, &state);
+    Ok(value)
+}
+
 #[tauri::command]
 fn set_app_setting(
     key: String,
@@ -265,11 +556,89 @@ fn set_app_setting(
     set_app_setting_value(&db, &key, &value).map_err(|error| error.to_string())?;
     drop(db);
 
+    broadcast_revision(&app, &state);
     if key == "app_language" {
         refresh_tray_menu(&app);
+        if let Some(window) = app.get_webview_window("settings") {
+            let title = match resolved_native_language(&app).as_str() {
+                "ja" => "設定とツール",
+                "en" => "Settings and tools",
+                _ => "设置与工具",
+            };
+            let _ = window.set_title(title);
+        }
     }
 
     Ok(())
+}
+
+#[tauri::command]
+fn schedule_notifications(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    let db = state.db.lock().map_err(|error| error.to_string())?;
+    notifications::schedule(&db, &app.config().identifier)
+}
+
+fn refresh_scheduled_notifications(app: &AppHandle, db: &Connection) {
+    if let Err(error) = notifications::refresh(db, &app.config().identifier) {
+        let _ = app.emit("deadline-notification-error", error);
+    } else {
+        let _ = app.emit("deadline-notification-error", "");
+    }
+}
+
+#[tauri::command]
+fn system_language() -> String {
+    system_native_language().to_string()
+}
+
+#[tauri::command]
+async fn open_settings_window(app: AppHandle, title: String) -> Result<(), String> {
+    // WebView2 creation waits on the UI thread. A synchronous IPC command runs
+    // on that same thread and deadlocks; keep this command on Tauri's runtime.
+    let _creation = SETTINGS_WINDOW_CREATION.lock().map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_webview_window("settings") {
+        window
+            .set_title(&title)
+            .map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        window.unminimize().map_err(|error| error.to_string())?;
+        return window.set_focus().map_err(|error| error.to_string());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        tauri::WebviewUrl::App("index.html?window=settings".into()),
+    )
+    .title(title)
+    .inner_size(520.0, 520.0)
+    .min_inner_size(480.0, 420.0)
+    .resizable(true)
+    .decorations(false)
+    .shadow(false)
+    .transparent(true)
+    .center()
+    .build()
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn show_panel(app: AppHandle) -> Result<(), String> {
+    show_panel_collapsed(&app, true, false)
+}
+
+#[tauri::command]
+fn settings_window_action(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
+    if window.label() != "settings" { return Err("Settings controls belong to the settings window".into()); }
+    match action.as_str() {
+        "hide" => window.hide(),
+        "minimize" => window.minimize(),
+        "drag" => window.start_dragging(),
+        _ => return Err("Unknown settings window action".into()),
+    }.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -633,6 +1002,7 @@ fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default();
+    builder = builder.plugin(tauri_plugin_dialog::init());
 
     #[cfg(desktop)]
     {
@@ -644,6 +1014,18 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(|window, event| {
+            #[cfg(all(windows, debug_assertions))]
+            if std::env::var_os("DEADLINE_PANEL_COMPOSITION_GLASS").is_some() && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                backdrop::refresh();
+            }
+            if window.label() == "settings" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .on_menu_event(|app, event| {
             handle_panel_menu_event(app, event.id().as_ref());
         })
@@ -654,6 +1036,7 @@ pub fn run() {
             initialize_database(&db).map_err(|error| error.to_string())?;
             position_main_window(app, &db)?;
             app.manage(AppState {
+                revision: AtomicU64::new(0),
                 db: Mutex::new(db),
                 db_path,
                 panel: Mutex::new(PanelState {
@@ -673,15 +1056,43 @@ pub fn run() {
             setup_tray(app)?;
             show_panel_collapsed(app.handle(), false, false).map_err(|error| error.to_string())?;
             start_long_runtime_watchdog(app.handle().clone());
+            #[cfg(debug_assertions)]
+            if std::env::var_os("DEADLINE_PANEL_ACCEPTANCE_OPEN_SETTINGS").is_some()
+                && std::env::var_os("DEADLINE_PANEL_ACCEPTANCE_DATA_DIR").is_some()
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = open_settings_window(handle, "设置与工具".into()).await {
+                        eprintln!("Acceptance settings creation failed: {error}");
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_window_material,
+            settings_window_action,
+            load_snapshot,
+            get_app_settings,
+            set_app_settings,
+            export_tasks_json,
+            read_import_json,
+            pending_deletes,
+            acknowledge_delete,
+            state_revision,
             list_tasks,
+            patch_task,
             save_task,
+            save_tasks,
             delete_task,
             replace_tasks,
             get_app_setting,
             set_app_setting,
+            set_appearance_preferences,
+            schedule_notifications,
+            system_language,
+            open_settings_window,
+            show_panel,
             data_file_path,
             open_data_dir,
             backup_database,
@@ -1784,6 +2195,13 @@ fn run_panel_drag_loop(
 }
 
 fn database_path(app: &AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Debug-only acceptance profile: never redirect a distributed build's data.
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("DEADLINE_PANEL_ACCEPTANCE_DATA_DIR") {
+        let dir = PathBuf::from(dir);
+        fs::create_dir_all(&dir)?;
+        return Ok(dir.join("deadline-panel.sqlite3"));
+    }
     let dir = app.path().app_data_dir()?;
     fs::create_dir_all(&dir)?;
     Ok(dir.join("deadline-panel.sqlite3"))
@@ -1800,10 +2218,14 @@ fn backup_database_file(
     fs::create_dir_all(&backup_dir)?;
     let backup_path = backup_dir.join(format!(
         "deadline-panel-{}-{}.sqlite3",
-        chrono_like_now(),
+        SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos(),
         label
     ));
-    fs::copy(db_path, &backup_path)?;
+    let source = Connection::open(db_path)?;
+    source.execute(
+        "VACUUM INTO ?1",
+        params![backup_path.to_string_lossy().to_string()],
+    )?;
     Ok(backup_path.to_string_lossy().to_string())
 }
 
@@ -1848,6 +2270,7 @@ fn configure_database(db: &Connection) -> rusqlite::Result<()> {
 }
 
 fn initialize_database(db: &Connection) -> rusqlite::Result<()> {
+    db.execute_batch("CREATE TABLE IF NOT EXISTS pending_deletes (namespace TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(namespace, task_id));")?;
     db.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS tasks (
@@ -2082,5 +2505,124 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
             .expect("count seeded tasks after second init");
         assert_eq!(second_count, 3);
+    }
+    #[test]
+    fn deletion_outbox_survives_reopen_and_is_atomic() {
+        let path = std::env::temp_dir().join(format!(
+            "deadline-outbox-test-{}-{}.sqlite3",
+            std::process::id(),
+            chrono_like_now()
+        ));
+        {
+            let mut db = Connection::open(&path).unwrap();
+            initialize_database(&db).unwrap();
+            let id: String = db
+                .query_row("SELECT id FROM tasks LIMIT 1", [], |row| row.get(0))
+                .unwrap();
+            db.execute_batch("CREATE TRIGGER block_delete BEFORE DELETE ON tasks BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+            assert!(persist_delete(&mut db, &id, Some("account-a")).is_err());
+            let count: i64 = db
+                .query_row("SELECT COUNT(*) FROM pending_deletes", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 0, "failed delete must roll back the outbox insert");
+            db.execute_batch("DROP TRIGGER block_delete").unwrap();
+            persist_delete(&mut db, &id, Some("account-a")).unwrap();
+        }
+        {
+            let db = Connection::open(&path).unwrap();
+            let count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM pending_deletes WHERE namespace = 'account-a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1);
+            let count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM pending_deletes WHERE namespace = 'account-b'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    fn synthetic_task(id: &str, title: &str) -> DeadlineTask {
+        serde_json::from_value(serde_json::json!({"id":id,"title":title,"dueAt":"2026-12-01T00:00:00Z","priority":"medium","status":"active","notes":"","source":"manual","isCurrent":false,"createdAt":"2026-10-03T00:00:00Z","updatedAt":"2026-10-03T00:00:00Z","completedAt":null})).unwrap()
+    }
+
+    #[test]
+    fn batch_failure_rolls_back_all_tasks() {
+        let mut db = Connection::open_in_memory().unwrap();
+        initialize_database(&db).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_synthetic BEFORE INSERT ON tasks WHEN NEW.title = 'reject' BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END;").unwrap();
+        let tasks = vec![
+            synthetic_task("batch-first", "accept"),
+            synthetic_task("batch-second", "reject"),
+        ];
+        assert!(persist_tasks(&mut db, &tasks).is_err());
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE id LIKE 'batch-%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn backup_includes_uncheckpointed_wal() {
+        let dir = std::env::temp_dir().join(format!(
+            "deadline-backup-test-{}-{}",
+            std::process::id(),
+            chrono_like_now()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("source.sqlite3");
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE evidence(value TEXT); INSERT INTO evidence VALUES ('in-wal');").unwrap();
+        let backup = backup_database_file(&path, "test").unwrap();
+        {
+            let copied = Connection::open(&backup).unwrap();
+            let value: String = copied
+                .query_row("SELECT value FROM evidence", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(value, "in-wal");
+        }
+        drop(db);
+        std::fs::remove_file(backup).unwrap();
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir.join("backups")).unwrap();
+        std::fs::remove_dir(dir).unwrap();
+    }
+    #[test]
+    fn independent_patches_preserve_other_task_fields() {
+        let db = Connection::open_in_memory().unwrap();
+        initialize_database(&db).unwrap();
+        write_task(&db, &synthetic_task("partial", "initial")).unwrap();
+        patch_existing_task(&db, "partial", serde_json::json!({"title":"new title"})).unwrap();
+        let updated =
+            patch_existing_task(&db, "partial", serde_json::json!({"notes":"new notes"})).unwrap();
+        assert_eq!(updated.title, "new title");
+        assert_eq!(updated.notes, "new notes");
+        assert!(
+            patch_existing_task(&db, "partial", serde_json::json!({"id":"different"})).is_err()
+        );
+    }
+
+    #[test]
+    fn appearance_changes_preserve_other_preferences() {
+        let db = Connection::open_in_memory().unwrap();
+        initialize_database(&db).unwrap();
+        merge_appearance_preferences(&db, serde_json::json!({"theme":"light"})).unwrap();
+        let value =
+            merge_appearance_preferences(&db, serde_json::json!({"lowPowerMode":true})).unwrap();
+        let current: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(current["theme"], "light");
+        assert_eq!(current["lowPowerMode"], true);
+        assert!(merge_appearance_preferences(&db, serde_json::json!({"theme":"invalid"})).is_err());
     }
 }
