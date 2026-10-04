@@ -1,5 +1,6 @@
 import { NotificationSettings } from "./NotificationSettings";
-import { SettingsChrome } from "./SettingsChrome";
+import { observeMaterialGeometry, syncMaterialGeometry } from "./materialGeometry";
+import { SettingsChrome, SettingsContent } from "./SettingsChrome";
 import { LiquidTextSegments } from "./LiquidTextSegments";
 import { installMotionTokens } from "./motion";
 import { useMinuteClock } from "./useMinuteClock";
@@ -139,6 +140,7 @@ export function App() {
   const windowRole = requestedRole === "settings" ? "settings" : requestedRole === "panel" ? "panel" : "strip";
   const isPanelWindow = windowRole !== "strip";
   const appearance = useDeadlineStore((state) => state.appearance);
+  const materialRequest = useRef(0);
   const tasks = useDeadlineStore((state) => state.tasks);
   const focusLimit = useDeadlineStore((state) => state.focusLimit);
   const isLoading = useDeadlineStore((state) => state.isLoading);
@@ -154,18 +156,22 @@ export function App() {
     installMotionTokens();
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
+      const request = ++materialRequest.current;
       document.documentElement.dataset.theme = appearance.theme === "system" ? (media.matches ? "dark" : "light") : appearance.theme;
       document.documentElement.dataset.lowPower = String(appearance.lowPowerMode);
       if (isTauriRuntime()) {
         const theme = document.documentElement.dataset.theme;
-        void setWindowMaterial(theme === "dark").then(mode => {
-          if (document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = mode;
-        }).catch(error => { if (document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = "compatibility"; console.error("Desktop material request failed", error); });
+        void setWindowMaterial(theme === "dark", appearance.lowPowerMode).then(async mode => {
+          if (mode === "gpu-glass") await syncMaterialGeometry();
+          if (request === materialRequest.current && document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = mode;
+        }).catch(error => { if (request === materialRequest.current && document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = "compatibility"; console.error("Desktop material request failed", error); });
       }
     };
     apply(); media.addEventListener("change", apply);
-    return () => media.removeEventListener("change", apply);
+    return () => { ++materialRequest.current; media.removeEventListener("change", apply); };
   }, [appearance.theme, appearance.lowPowerMode]);
+
+  useEffect(observeMaterialGeometry, []);
 
   useEffect(() => {
     const pointer = () => { document.documentElement.dataset.input = "pointer"; };
@@ -183,6 +189,7 @@ export function App() {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     let unlistenNotifications: (() => void) | undefined;
+    let unlistenMaterial: (() => void) | undefined;
     async function initialize() {
       if (isTauriRuntime()) {
         const stop = await listen<number>("deadline-state-changed", () => void load({ silent: true }));
@@ -191,12 +198,19 @@ export function App() {
         const stopNotifications = await listen<string>("deadline-notification-error", ({ payload }) => useDeadlineStore.setState({ notificationError: payload || null }));
         if (disposed) { stopNotifications(); return; }
         unlistenNotifications = stopNotifications;
+        const stopMaterial = await listen<string>("deadline-material-failed", ({ payload }) => {
+          ++materialRequest.current;
+          document.documentElement.dataset.material = "compatibility";
+          console.error("Glass renderer recovered to theme color", payload);
+        });
+        if (disposed) { stopMaterial(); return; }
+        unlistenMaterial = stopMaterial;
         setNativeSystemLanguage(await getSystemLanguage().catch(() => ""));
       }
       if (!disposed) await load();
     }
     void initialize();
-    return () => { disposed = true; unlisten?.(); unlistenNotifications?.(); };
+    return () => { disposed = true; unlisten?.(); unlistenNotifications?.(); unlistenMaterial?.(); };
   }, [load]);
 
   useEffect(() => {
@@ -469,10 +483,12 @@ export function App() {
 
   if (windowRole === "settings") {
     return <main className="settings-window">
+      <SettingsContent>
       <h1>Deadline Panel</h1>
       {error ? <p className="error-message" role="alert">{error}</p> : null}
-      <SettingsChrome />
       <SettingsPanel standalone />
+      </SettingsContent>
+      <SettingsChrome />
     </main>;
   }
 

@@ -196,11 +196,19 @@ export async function showPanel(): Promise<void> {
   if (isTauriRuntime()) await invoke("show_panel");
 }
 
-export async function setWindowMaterial(dark: boolean): Promise<string> {
-  return isTauriRuntime() ? invoke<string>("set_window_material", { dark }) : "compatibility";
+export async function setWindowMaterial(dark: boolean, lowPower = false): Promise<string> {
+  return isTauriRuntime() ? invoke<string>("set_window_material", { dark, lowPower }) : "compatibility";
 }
 
-export async function settingsWindowAction(action: "hide" | "minimize" | "drag"): Promise<void> {
+export async function setMaterialGeometry(rects: number[][]): Promise<void> {
+  if (isTauriRuntime()) await invoke("set_material_geometry", { rects });
+}
+
+export async function fitSettingsWindow(height: number): Promise<void> {
+  if (isTauriRuntime()) await invoke("fit_settings_window", { height });
+}
+
+export async function settingsWindowAction(action: "hide" | "minimize" | "drag" | "toggle-maximize"): Promise<void> {
   if (isTauriRuntime()) await invoke("settings_window_action", { action });
 }
 

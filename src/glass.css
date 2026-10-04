@@ -55,6 +55,19 @@
 :root[data-material="compatibility"] .expanded-panel,
 :root[data-material="compatibility"] .settings-window { background:var(--material-compat); }
 
+/* GPU output already includes the optical material and readable theme tint.
+ * Avoid covering it with the fallback's opaque fill or duplicating blur. */
+:root[data-material="gpu-glass"] .collapsed-strip,
+:root[data-material="gpu-glass"] .expanded-panel,
+:root[data-material="gpu-glass"] .settings-window {
+  background:transparent;
+  backdrop-filter:none;
+  border:1px solid var(--glass-rim-low);
+  box-shadow:inset 0 1px 0 var(--glass-rim),inset 0 -1px 0 rgba(0,0,0,.10);
+}
+:root[data-material="gpu-glass"] { --muted:rgba(255,255,255,.72); }
+:root[data-material="gpu-glass"][data-theme="light"] { --muted:rgba(0,0,0,.64); }
+
 .settings-window { position:relative; border-radius:14px; padding-top:54px; scrollbar-width:thin; scrollbar-color:var(--glass-rim-low) transparent; }
 .settings-window::-webkit-scrollbar,.expanded-panel::-webkit-scrollbar { width:6px; }
 .settings-window::-webkit-scrollbar-track,.expanded-panel::-webkit-scrollbar-track { background:transparent; margin:16px 0; }
@@ -77,3 +90,33 @@
 .postpone-control > .text-button { height:30px; min-height:30px; padding:0 10px; gap:6px; font-size:12px; border:1px solid rgba(255,255,255,.18); background:var(--glass-card); color:var(--muted); }
 .expanded-panel { scrollbar-width:thin; scrollbar-color:var(--glass-rim-low) transparent; }
 
+/* Windows caption controls occupy the right edge of the custom glass header. */
+.settings-chrome { padding:0 0 0 14px; gap:0; }
+.settings-chrome__title { flex:1; }
+.settings-chrome__controls { height:36px; gap:0; }
+.settings-chrome__controls button { width:46px; height:36px; border-radius:0; background:transparent; color:var(--text); }
+.settings-chrome__controls button:hover { background:var(--glass-rim-low); }
+.settings-chrome__controls .settings-chrome__close:hover { background:#c42b1c; color:white; }
+.settings-chrome__close { border-top-right-radius:14px !important; }
+.settings-content > h1 { margin:0 0 16px; font-size:22px; font-weight:600; }
+@media (max-height:760px) {
+ .settings-window { padding:46px 16px 12px; }
+ .settings-content > h1 { margin-bottom:10px; font-size:20px; }
+ .settings-window .settings-panel { gap:10px; }
+ .settings-window .settings-preferences { gap:10px; }
+ .settings-window .settings-preferences,.settings-window .settings-notifications,.settings-window .settings-actions { padding:12px; }
+ .settings-window .settings-row { padding-bottom:10px; }
+ .settings-window .settings-row--toggle { gap:9px; padding-bottom:0; }
+ .settings-window .setting-copy { font-size:12px; }
+}
+@media (max-height:760px) {
+ .settings-window .settings-actions button { min-height:30px; height:30px; padding:0 8px; }
+ .settings-window .settings-actions { gap:8px; }
+ .settings-window .settings-notifications { padding:10px 12px; }
+ .settings-window .settings-notifications p { margin:4px 0; font-size:12px; line-height:1.3; }
+ .settings-window .settings-notifications button { min-height:30px; padding:4px 10px; }
+ .settings-window .settings-preferences { gap:8px; }
+ .settings-window .setting-copy { line-height:1.3; }
+ .settings-window .settings-row--toggle { gap:6px; }
+}
+@media (max-height:760px) { .settings-window .settings-panel { gap:6px; } .settings-content > h1 { margin-bottom:6px; } }

@@ -1,7 +1,7 @@
 mod notifications;
 #[cfg(windows)]
 mod material;
-#[cfg(all(windows, debug_assertions))]
+#[cfg(windows)]
 mod backdrop;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -43,7 +43,15 @@ static SETTINGS_WINDOW_CREATION: Mutex<()> = Mutex::new(());
 /// Desktop blur with checked native return values. System acceptance still
 /// does not prove optical equivalence to Apple's Liquid Glass.
 #[tauri::command]
-async fn set_window_material(window: tauri::WebviewWindow, dark: bool) -> Result<String, String> {
+fn set_material_geometry(window: tauri::WebviewWindow, rects: Vec<[f32;5]>) {
+    #[cfg(windows)]
+    if rects.len() <= 8 && rects.iter().flatten().all(|n|n.is_finite()) { backdrop::geometry(&window,rects); }
+    #[cfg(not(windows))]
+    let _ = (window,rects);
+}
+
+#[tauri::command]
+async fn set_window_material(window: tauri::WebviewWindow, dark: bool, low_power: Option<bool>) -> Result<String, String> {
     #[cfg(windows)]
     {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -51,10 +59,10 @@ async fn set_window_material(window: tauri::WebviewWindow, dark: bool) -> Result
         window.run_on_main_thread(move || {
             // Keep native title bars and system controls in the selected theme.
             let theme_result = target.set_theme(Some(if dark { tauri::Theme::Dark } else { tauri::Theme::Light }));
-            let result = theme_result.map_err(|error| error.to_string()).and_then(|_| material::apply(&target, dark));
-            let _ = tx.send(result);
+            let _ = tx.send(theme_result.map_err(|error|error.to_string()));
         }).map_err(|error| error.to_string())?;
-        let mode = rx.recv_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())??;
+        rx.recv_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())??;
+        let mode = tauri::async_runtime::spawn_blocking(move || material::apply(&window,dark,low_power.unwrap_or(false))).await.map_err(|error|error.to_string())??;
         Ok(mode.into())
     }
     #[cfg(not(windows))]
@@ -613,7 +621,7 @@ async fn open_settings_window(app: AppHandle, title: String) -> Result<(), Strin
         tauri::WebviewUrl::App("index.html?window=settings".into()),
     )
     .title(title)
-    .inner_size(520.0, 520.0)
+    .inner_size(600.0, 900.0)
     .min_inner_size(480.0, 420.0)
     .resizable(true)
     .decorations(false)
@@ -631,14 +639,33 @@ fn show_panel(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn settings_window_action(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
+async fn settings_window_action(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
     if window.label() != "settings" { return Err("Settings controls belong to the settings window".into()); }
     match action.as_str() {
         "hide" => window.hide(),
         "minimize" => window.minimize(),
         "drag" => window.start_dragging(),
+        "toggle-maximize" => {
+            if window.is_maximized().map_err(|error| error.to_string())? { window.unmaximize() } else { window.maximize() }
+        },
         _ => return Err("Unknown settings window action".into()),
     }.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn fit_settings_window(window: tauri::WebviewWindow, height: f64) -> Result<(), String> {
+    if window.label() != "settings" || !height.is_finite() { return Err("Invalid settings size request".into()); }
+    if window.is_maximized().map_err(|error| error.to_string())? { return Ok(()); }
+    let monitor = window.current_monitor().map_err(|error| error.to_string())?;
+    let scale = window.scale_factor().map_err(|error| error.to_string())?;
+    let limit = monitor.as_ref().map(|monitor| monitor.work_area().size.height as f64 / scale - 16.0).unwrap_or(900.0);
+    let target = height.clamp(420.0, limit.max(420.0));
+    let current = window.inner_size().map_err(|error| error.to_string())?;
+    if (current.height as f64 / scale - target).abs() > 1.0 {
+        window.set_size(tauri::LogicalSize::new(current.width as f64 / scale, target)).map_err(|error| error.to_string())?;
+        window.center().map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1015,10 +1042,6 @@ pub fn run() {
 
     builder
         .on_window_event(|window, event| {
-            #[cfg(all(windows, debug_assertions))]
-            if std::env::var_os("DEADLINE_PANEL_COMPOSITION_GLASS").is_some() && matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
-                backdrop::refresh();
-            }
             if window.label() == "settings" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -1070,8 +1093,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            set_material_geometry,
             set_window_material,
             settings_window_action,
+            fit_settings_window,
             load_snapshot,
             get_app_settings,
             set_app_settings,
