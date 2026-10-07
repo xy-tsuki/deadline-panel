@@ -15,6 +15,24 @@ export interface PanelPointerState {
 
 export interface PanelExpandResult {
   direction: "up" | "down";
+  expanded?: boolean;
+}
+
+export interface PanelVisibility {
+  visible: boolean;
+  manualHidden: boolean;
+  autoHidden: boolean;
+  expanded: boolean;
+  dragging: boolean;
+  direction: "up" | "down";
+}
+
+export async function getPanelVisibility(): Promise<PanelVisibility> {
+  return invoke<PanelVisibility>("get_panel_visibility");
+}
+
+export async function restartApp(): Promise<void> {
+  if (isTauriRuntime()) await invoke("restart_app");
 }
 
 export function isTauriRuntime(): boolean {

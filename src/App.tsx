@@ -11,7 +11,6 @@ import { AppearanceSettings } from "./AppearanceSettings";
 import { listenForSyncRequests } from "./sync/owner";
 import { listen } from "@tauri-apps/api/event";
 import { type FormEvent, type MouseEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import {
   Check,
@@ -49,13 +48,14 @@ import {
   getPanelExpandDirection,
   hidePanelTemporarily,
   hidePanelForMinutes,
-  isForegroundWindowFullscreen,
+  getPanelVisibility,
+  type PanelVisibility,
   isTauriRuntime,
   openDataDir,
   openSettingsWindow,
   resetPanelPosition,
   setAutostartEnabled,
-  setPanelAutoHidden,
+  restartApp,
   setPanelExpanded as setNativePanelExpanded,
   showPanelContextMenu,
   showPanel,
@@ -72,7 +72,6 @@ import { APP_VERSION } from "./version";
 const priorityOptions: TaskPriority[] = ["urgent", "high", "medium", "low"];
 const COLLAPSE_DELAY_MS = 220;
 const COLLAPSE_ANIMATION_MS = 210;
-const FULLSCREEN_CHECK_INTERVAL_MS = 1200;
 const COLLAPSED_HOVER_DWELL_MS = 180;
 const RELEASES_API_URL = "https://api.github.com/repos/xy-tsuki/deadline-panel/releases/latest";
 const CLOUD_SYNC_START_DELAY_MS = 10_000;
@@ -297,40 +296,34 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!isTauriRuntime()) return;
-    if (isPanelWindow || isLoading) return;
-    if (!appearance.fullscreenAutoHide) {
-      lastAutoHiddenRef.current = false;
-      void setPanelAutoHidden(false);
-      return;
-    }
-
-    let isMounted = true;
-    async function syncFullscreenState() {
-      try {
-        const isFullscreen = await isForegroundWindowFullscreen();
-        if (!isMounted) return;
-
-        if (isFullscreen === lastAutoHiddenRef.current) return;
-
-        lastAutoHiddenRef.current = isFullscreen;
-        if (isFullscreen) {
-          setIsExpanded(false);
-          clearAnimationTimer();
-        }
-        await setPanelAutoHidden(isFullscreen);
-      } catch {
-        // Fullscreen detection is best-effort; the panel should keep working if it fails.
+    if (!isTauriRuntime() || windowRole === "settings") return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    const apply = (state: PanelVisibility) => {
+      if (disposed) return;
+      lastAutoHiddenRef.current = !state.visible;
+      isDraggingPanelRef.current = state.dragging;
+      setIsExpanded(state.expanded);
+      setExpandDirection(state.direction);
+      if (!state.expanded) {
+        clearCollapseTimer();
+        clearAnimationTimer();
+        clearCollapsedHoverTimer();
       }
-    }
-
-    void syncFullscreenState();
-    const interval = window.setInterval(() => void syncFullscreenState(), FULLSCREEN_CHECK_INTERVAL_MS);
-    return () => {
-      isMounted = false;
-      window.clearInterval(interval);
     };
-  }, [isPanelWindow, isLoading, appearance.fullscreenAutoHide]);
+    // Fullscreen visibility belongs to the native process. Its timer keeps
+    // running even when Windows suspends timers in a hidden WebView.
+    void listen<PanelVisibility>("deadline-panel-visibility", ({ payload }) => apply(payload))
+      .then(async unlisten => {
+        if (disposed) { unlisten(); return; }
+        stop = unlisten;
+        apply(await getPanelVisibility());
+      }).catch(error => console.error("Panel visibility sync failed", error));
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, [windowRole]);
 
 
   function clearAnimationTimer() {
@@ -388,7 +381,7 @@ export function App() {
 
     const result = await setNativePanelExpanded(true);
     setExpandDirection(result.direction);
-    setIsExpanded(true);
+    setIsExpanded(result.expanded ?? true);
   }
 
   function collapsePanel() {
@@ -1403,7 +1396,7 @@ function SettingsPanel({ standalone = false }: { standalone?: boolean }) {
         }, { timeout: UPDATE_DOWNLOAD_TIMEOUT_MS });
 
         setMessage(updaterText.restarting);
-        await relaunch();
+        await restartApp();
         return;
       }
 
