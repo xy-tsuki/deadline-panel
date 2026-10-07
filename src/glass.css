@@ -120,3 +120,69 @@
  .settings-window .settings-row--toggle { gap:6px; }
 }
 @media (max-height:760px) { .settings-window .settings-panel { gap:6px; } .settings-content > h1 { margin-bottom:6px; } }
+
+/* Restore point: translucent rounded surfaces, with background blur disabled. */
+:root[data-material="compatibility"] .collapsed-strip,
+:root[data-material="compatibility"] .expanded-panel,
+:root[data-material="compatibility"] .settings-window { backdrop-filter:none; }
+
+/* Frameless WebView bounds clip an outer shadow into a rectangular tile when
+ * the panel is shorter than its window. Keep the rim inside the rounded surface. */
+:root[data-material="compatibility"] .expanded-panel {
+  box-shadow:inset 0 1px 0 var(--glass-rim-low);
+}
+
+/* A white desktop needs visible neutral surfaces and opaque text, rather than
+ * stacking white highlights and translucent gray labels. */
+:root[data-theme="dark"][data-material="compatibility"] {
+  --material-compat:rgba(22,22,24,.90);
+}
+:root[data-theme="dark"][data-material="compatibility"] .desktop-stage {
+  --material-compat:rgba(22,22,24,.80);
+}
+:root[data-theme="light"][data-material="compatibility"] {
+  --text:#202c3c;
+  --muted:#4b596d;
+  --subtle:#546276;
+  --material-compat:rgba(230,235,243,.96);
+  --line:rgba(51,70,96,.20);
+  --line-strong:rgba(51,70,96,.32);
+  --glass-rim:rgba(255,255,255,.80);
+  --glass-rim-low:rgba(51,70,96,.27);
+  --glass-card:rgba(255,255,255,.48);
+  --glass-specular:rgba(255,255,255,.24);
+  --glass-highlight:rgba(255,255,255,.78);
+  --glass-tint:rgba(237,242,249,.74);
+  --glass-tail:rgba(219,227,239,.46);
+  --glass-edge:rgba(51,70,96,.32);
+  --glass-shadow:rgba(38,54,77,.15);
+  --panel-soft:rgba(255,255,255,.32);
+  --field-bg:rgba(255,255,255,.90);
+}
+:root[data-theme="light"][data-material="compatibility"] :is(.collapsed-strip,.expanded-panel,.settings-window) {
+  border:1px solid rgba(66,85,110,.38);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.85);
+}
+:root[data-theme="light"][data-material="compatibility"] :is(.topn-segments,.liquid-text-segments) {
+  background:rgba(196,207,223,.56);
+  box-shadow:inset 0 1px 2px rgba(38,54,77,.10);
+}
+:root[data-theme="light"][data-material="compatibility"] :is(.topn-segments__selection,.liquid-text-segments__selection) {
+  background:linear-gradient(#f8fbff,#e0ebf9);
+  border-color:#718bab;
+  box-shadow:0 1px 3px rgba(38,54,77,.18),inset 0 1px 0 white;
+}
+:root[data-theme="light"][data-material="compatibility"] :is(.topn-segments,.liquid-text-segments) button[aria-checked="true"] {
+  color:var(--accent-strong);
+}
+:root[data-theme="light"][data-material="compatibility"] .postpone-control > .text-button {
+  border-color:var(--glass-edge);
+  color:var(--text);
+}
+:root[data-theme="light"][data-material="compatibility"] .panel-section--command {
+  background:rgba(51,70,96,.035);
+}
+:root[data-theme="light"][data-material="compatibility"] :is(.data-path,.settings-input) {
+  background:var(--field-bg);
+  border-color:var(--line-strong);
+}

@@ -1,5 +1,4 @@
 import { NotificationSettings } from "./NotificationSettings";
-import { observeMaterialGeometry, syncMaterialGeometry } from "./materialGeometry";
 import { SettingsChrome, SettingsContent } from "./SettingsChrome";
 import { LiquidTextSegments } from "./LiquidTextSegments";
 import { installMotionTokens } from "./motion";
@@ -47,6 +46,7 @@ import {
   setWindowMaterial,
   backupDatabase,
   getPanelPointerState,
+  getPanelExpandDirection,
   hidePanelTemporarily,
   hidePanelForMinutes,
   isForegroundWindowFullscreen,
@@ -161,8 +161,7 @@ export function App() {
       document.documentElement.dataset.lowPower = String(appearance.lowPowerMode);
       if (isTauriRuntime()) {
         const theme = document.documentElement.dataset.theme;
-        void setWindowMaterial(theme === "dark", appearance.lowPowerMode).then(async mode => {
-          if (mode === "gpu-glass") await syncMaterialGeometry();
+        void setWindowMaterial(theme === "dark", appearance.lowPowerMode).then(mode => {
           if (request === materialRequest.current && document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = mode;
         }).catch(error => { if (request === materialRequest.current && document.documentElement.dataset.theme === theme) document.documentElement.dataset.material = "compatibility"; console.error("Desktop material request failed", error); });
       }
@@ -171,7 +170,6 @@ export function App() {
     return () => { ++materialRequest.current; media.removeEventListener("change", apply); };
   }, [appearance.theme, appearance.lowPowerMode]);
 
-  useEffect(observeMaterialGeometry, []);
 
   useEffect(() => {
     const pointer = () => { document.documentElement.dataset.input = "pointer"; };
@@ -184,6 +182,21 @@ export function App() {
   const focusTasks = useMemo(() => selectFocusTasks(tasks, focusLimit), [focusLimit, tasks]);
   const nearest = useMemo(() => getNearestDeadline(tasks), [tasks]);
   const currentTasks = useMemo(() => getCurrentTasks(tasks), [tasks]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || !isPanelWindow) return;
+    let disposed = false;
+    let stop: (() => void) | undefined;
+    void listen<"up" | "down">("deadline-panel-direction", ({ payload }) => {
+      if (!disposed) setExpandDirection(payload);
+    }).then(async unlisten => {
+      if (disposed) { unlisten(); return; }
+      stop = unlisten;
+      const result = await getPanelExpandDirection();
+      if (!disposed) setExpandDirection(result.direction);
+    });
+    return () => { disposed = true; stop?.(); };
+  }, [isPanelWindow]);
 
   useEffect(() => {
     let disposed = false;

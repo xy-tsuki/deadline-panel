@@ -1,60 +1,88 @@
-//! Desktop blur belongs to the OS compositor; CSS only supplies the surface.
-//! Windows 10 has no public system-backdrop attribute. Its compatibility API
-//! is resolved dynamically and its BOOL is checked, unlike window-vibrancy 0.6.
-use std::{ffi::c_void, mem::size_of};
-use windows::{core::{s, w, BOOL}, Win32::{Foundation::HWND, Graphics::Dwm::{DwmIsCompositionEnabled, DwmSetWindowAttribute, DWMWINDOWATTRIBUTE}, System::LibraryLoader::{GetModuleHandleW, GetProcAddress}}};
-
+//! DWM owns the real desktop backdrop; no application capture or render loop.
+//! Win10 Accent is an undocumented compatibility API also used by window-vibrancy.
+use std::{
+    ffi::c_void,
+    mem::size_of,
+    sync::atomic::{AtomicU64, Ordering},
+};
+use windows::{
+    core::{s, w, BOOL},
+    Win32::{
+        Foundation::HWND,
+        Graphics::Dwm::{DwmIsCompositionEnabled, DwmSetWindowAttribute, DWMWINDOWATTRIBUTE},
+        System::LibraryLoader::{GetModuleHandleW, GetProcAddress},
+    },
+};
 #[repr(C)]
-struct AccentPolicy { state: u32, flags: u32, color: u32, animation: u32 }
+struct AccentPolicy {
+    state: u32,
+    flags: u32,
+    color: u32,
+    animation: u32,
+}
 #[repr(C)]
-struct CompositionAttribute { attribute: u32, data: *mut c_void, size: usize }
+struct CompositionAttribute {
+    attribute: u32,
+    data: *mut c_void,
+    size: usize,
+}
 type SetComposition = unsafe extern "system" fn(HWND, *mut CompositionAttribute) -> BOOL;
-
+static REQUESTS: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
 fn abgr(red: u8, green: u8, blue: u8, alpha: u8) -> u32 {
     u32::from_le_bytes([red, green, blue, alpha])
 }
-
-pub fn apply(window: &tauri::WebviewWindow, dark: bool, low_power: bool) -> Result<&'static str, String> {
-    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+pub fn diagnostics() -> serde_json::Value {
+    serde_json::json!({"renderer":"translucent-no-blur","applicationBackgroundSampling":false,"applicationRenderWorker":false,"blurRadius":0,"nativeRequests":REQUESTS.load(Ordering::Relaxed)})
+}
+unsafe fn accent(hwnd: HWND, policy: &mut AccentPolicy) -> Result<(), String> {
+    let library = GetModuleHandleW(w!("user32.dll")).map_err(|e| e.to_string())?;
+    let entry = GetProcAddress(library, s!("SetWindowCompositionAttribute"))
+        .ok_or_else(|| "Window composition API is unavailable".to_string())?;
+    let set_composition: SetComposition = std::mem::transmute(entry);
+    let mut data = CompositionAttribute {
+        attribute: 19,
+        data: policy as *mut _ as _,
+        size: size_of::<AccentPolicy>(),
+    };
+    if !set_composition(hwnd, &mut data).as_bool() {
+        return Err("DWM rejected the window blur policy".into());
+    }
+    Ok(())
+}
+pub fn apply(
+    window: &tauri::WebviewWindow,
+    _dark: bool,
+    _low_power: bool,
+) -> Result<&'static str, String> {
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
     unsafe {
-        if !DwmIsCompositionEnabled().map_err(|error| error.to_string())?.as_bool() {
+        if !DwmIsCompositionEnabled()
+            .map_err(|e| e.to_string())?
+            .as_bool()
+        {
             return Err("Desktop composition is disabled".into());
         }
-        // Public system backdrop on Windows 11 22621+. Older systems reject
-        // attribute 38, so no guessed build number or manifest version is used.
-        let transient: u32 = 3;
-        if !low_power && DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(38), &transient as *const _ as _, size_of::<u32>() as u32).is_ok() {
-            let round: u32 = 2;
-            let _ = DwmSetWindowAttribute(hwnd, DWMWINDOWATTRIBUTE(33), &round as *const _ as _, size_of::<u32>() as u32);
-            return Ok("acrylic-dwm");
-        }
-        let library = GetModuleHandleW(w!("user32.dll")).map_err(|error| error.to_string())?;
-        let entry = GetProcAddress(library, s!("SetWindowCompositionAttribute"))
-            .ok_or_else(|| "Windows 10 desktop material API is unavailable".to_string())?;
-        let set_composition: SetComposition = std::mem::transmute(entry);
-        if low_power {
-            let none: u32=1;
-            let _=DwmSetWindowAttribute(hwnd,DWMWINDOWATTRIBUTE(38),&none as *const _ as _,size_of::<u32>() as u32);
-            let mut disabled=AccentPolicy{state:0,flags:0,color:0,animation:0};
-            let mut data=CompositionAttribute{attribute:19,data:&mut disabled as *mut _ as _,size:size_of::<AccentPolicy>()};
-            if !set_composition(hwnd,&mut data).as_bool(){return Err("Failed to disable desktop effects".into());}
-            crate::backdrop::remove(window);
-            return Ok("compatibility");
-        }
-        {
-            let mut disabled=AccentPolicy {state:0,flags:0,color:0,animation:0};
-            let mut data=CompositionAttribute {attribute:19,data:&mut disabled as *mut _ as _,size:size_of::<AccentPolicy>()};
-            if !set_composition(hwnd,&mut data).as_bool() { return Err("Failed to clear rectangular Acrylic".into()); }
-            if std::env::var("DEADLINE_PANEL_COMPOSITION_GLASS").as_deref() == Ok("baseline") {
-                crate::backdrop::remove(window);
-                return Ok("compatibility");
-            }
-            return crate::backdrop::apply(window, dark);
-        }
+        REQUESTS.fetch_add(1, Ordering::Relaxed);
+        let none: u32 = 1;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWINDOWATTRIBUTE(38),
+            &none as *const _ as _,
+            size_of::<u32>() as u32,
+        );
+        accent(
+            hwnd,
+            &mut AccentPolicy {
+                state: 0,
+                flags: 0,
+                color: 0,
+                animation: 0,
+            },
+        )?;
+        Ok("compatibility")
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,6 +91,9 @@ mod tests {
         assert_eq!(abgr(24, 24, 26, 64), 0x401a1818);
         assert_eq!(abgr(244, 244, 246, 86), 0x56f6f4f4);
         assert_eq!(size_of::<AccentPolicy>(), 16);
-        assert_eq!(size_of::<CompositionAttribute>(), if size_of::<usize>() == 8 { 24 } else { 12 });
+        assert_eq!(
+            size_of::<CompositionAttribute>(),
+            if size_of::<usize>() == 8 { 24 } else { 12 }
+        );
     }
 }

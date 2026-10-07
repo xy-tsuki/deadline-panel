@@ -14,7 +14,8 @@ function argument(name, fallback) {
   if (!value || value.startsWith("--")) throw new Error(`Missing value for ${name}`);
   return value;
 }
-const releaseTag = argument("--release-tag", `v${version}`);
+// Windows candidates use their own release tag; v<version> belongs to macOS.
+const releaseTag = argument("--release-tag", `windows-v${version}`);
 const bundleDir = path.join(rootDir, "src-tauri", "target", "release", "bundle", "nsis");
 const setupName = `Deadline Panel_${version}_x64-setup.exe`;
 const setupPath = path.join(bundleDir, setupName);
@@ -37,7 +38,7 @@ const releaseAssetName = setupName.replaceAll(" ", ".");
 const assetName = encodeURIComponent(releaseAssetName);
 const manifest = {
   version,
-  notes: `Deadline Panel v${version}`,
+  notes: `Deadline Panel v${version} for Windows`,
   pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {

@@ -1,8 +1,6 @@
 mod notifications;
 #[cfg(windows)]
 mod material;
-#[cfg(windows)]
-mod backdrop;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -40,14 +38,11 @@ use windows::Win32::{
 const PANEL_WIDTH: f64 = 372.0;
 static SETTINGS_WINDOW_CREATION: Mutex<()> = Mutex::new(());
 
-/// Desktop blur with checked native return values. System acceptance still
-/// does not prove optical equivalence to Apple's Liquid Glass.
+/// Reports the current no-blur renderer and native material request count.
 #[tauri::command]
-fn set_material_geometry(window: tauri::WebviewWindow, rects: Vec<[f32;5]>) {
-    #[cfg(windows)]
-    if rects.len() <= 8 && rects.iter().flatten().all(|n|n.is_finite()) { backdrop::geometry(&window,rects); }
-    #[cfg(not(windows))]
-    let _ = (window,rects);
+fn get_material_diagnostics()->serde_json::Value {
+    #[cfg(windows)] {material::diagnostics()}
+    #[cfg(not(windows))] {serde_json::json!({})}
 }
 
 #[tauri::command]
@@ -58,11 +53,12 @@ async fn set_window_material(window: tauri::WebviewWindow, dark: bool, low_power
         let target = window.clone();
         window.run_on_main_thread(move || {
             // Keep native title bars and system controls in the selected theme.
-            let theme_result = target.set_theme(Some(if dark { tauri::Theme::Dark } else { tauri::Theme::Light }));
-            let _ = tx.send(theme_result.map_err(|error|error.to_string()));
+            let result = target.set_theme(Some(if dark { tauri::Theme::Dark } else { tauri::Theme::Light }))
+                .map_err(|error|error.to_string())
+                .and_then(|_| material::apply(&target,dark,low_power.unwrap_or(false)));
+            let _ = tx.send(result);
         }).map_err(|error| error.to_string())?;
-        rx.recv_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())??;
-        let mode = tauri::async_runtime::spawn_blocking(move || material::apply(&window,dark,low_power.unwrap_or(false))).await.map_err(|error|error.to_string())??;
+        let mode = rx.recv_timeout(Duration::from_secs(5)).map_err(|error| error.to_string())??;
         Ok(mode.into())
     }
     #[cfg(not(windows))]
@@ -1093,7 +1089,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            set_material_geometry,
+            get_material_diagnostics,
             set_window_material,
             settings_window_action,
             fit_settings_window,

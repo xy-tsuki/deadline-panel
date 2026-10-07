@@ -4,12 +4,12 @@ export interface AppearancePreferences {
   lowPowerMode: boolean;
   fullscreenAutoHide: boolean;
 }
-export const defaultAppearance: AppearancePreferences = { theme: "system", lowPowerMode: false, fullscreenAutoHide: true };
+export const defaultAppearance: AppearancePreferences = { theme: "dark", lowPowerMode: false, fullscreenAutoHide: true };
 export function parseAppearance(value: string | null): AppearancePreferences {
   try {
     const stored = JSON.parse(value ?? "{}");
     return {
-      theme: ["system", "light", "dark"].includes(stored?.theme) ? stored.theme : "system",
+      theme: ["system", "light", "dark"].includes(stored?.theme) ? stored.theme : defaultAppearance.theme,
       lowPowerMode: stored?.lowPowerMode === true,
       fullscreenAutoHide: stored?.fullscreenAutoHide !== false
     };

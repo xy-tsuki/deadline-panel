@@ -80,6 +80,18 @@ button {
 .panel-window {
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.panel-window--open-down {
+  justify-content: flex-start;
+}
+
+.panel-window > .expanded-panel {
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
 .collapsed-strip {

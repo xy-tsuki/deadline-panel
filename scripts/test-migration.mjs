@@ -9,10 +9,12 @@ async function load(file) {
   return import("data:text/javascript;base64," + Buffer.from(compiled).toString("base64"));
 }
 const { parseAppearance } = await load("../src/domain/appearance.ts");
-assert.deepEqual(parseAppearance(null), { theme: "system", lowPowerMode: false, fullscreenAutoHide: true });
+assert.deepEqual(parseAppearance(null), { theme: "dark", lowPowerMode: false, fullscreenAutoHide: true });
 assert.deepEqual(parseAppearance('{"theme":"light","lowPowerMode":true,"fullscreenAutoHide":false}'), { theme: "light", lowPowerMode: true, fullscreenAutoHide: false });
-assert.equal(parseAppearance("invalid").theme, "system");
-assert.equal(parseAppearance("null").theme, "system");
+assert.equal(parseAppearance("invalid").theme, "dark");
+assert.equal(parseAppearance("null").theme, "dark");
+assert.equal(parseAppearance('{"theme":"system"}').theme, "system");
+assert.equal(parseAppearance('{"lowPowerMode":true}').theme, "dark");
 const { isValidAbsoluteTimestamp } = await load("../src/domain/timestamp.ts");
 globalThis.isValidAbsoluteTimestamp = isValidAbsoluteTimestamp;
 assert.equal(isValidAbsoluteTimestamp("2026-02-29T00:00:00Z"), false);

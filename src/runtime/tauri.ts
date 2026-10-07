@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo } from "@tauri-apps/api/event";
 
 export interface PanelPointerState {
   inTrigger: boolean;
@@ -25,7 +26,9 @@ export async function setPanelExpanded(expanded: boolean): Promise<PanelExpandRe
     return { direction: "up" };
   }
 
-  return invoke<PanelExpandResult>("set_panel_expanded", { expanded });
+  const result = await invoke<PanelExpandResult>("set_panel_expanded", { expanded });
+  await emitTo("panel", "deadline-panel-direction", result.direction);
+  return result;
 }
 
 export async function getPanelExpandDirection(): Promise<PanelExpandResult> {
@@ -198,10 +201,6 @@ export async function showPanel(): Promise<void> {
 
 export async function setWindowMaterial(dark: boolean, lowPower = false): Promise<string> {
   return isTauriRuntime() ? invoke<string>("set_window_material", { dark, lowPower }) : "compatibility";
-}
-
-export async function setMaterialGeometry(rects: number[][]): Promise<void> {
-  if (isTauriRuntime()) await invoke("set_material_geometry", { rects });
 }
 
 export async function fitSettingsWindow(height: number): Promise<void> {
