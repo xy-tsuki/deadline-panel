@@ -476,14 +476,16 @@ export function App() {
     window.addEventListener("pointerup", markDragDone, { once: true });
     window.addEventListener("mouseup", markDragDone, { once: true });
 
-    if (isExpanded) {
-      setIsExpanded(false);
-      const result = await setNativePanelExpanded(false);
-      setExpandDirection(result.direction);
-    }
-
+    // The native drag entry collapses the panel and starts dragging together.
+    // A separate collapse broadcasts dragging=false and cancels this gesture.
+    setIsExpanded(false);
     if (isDraggingPanelRef.current) {
-      await startPanelDrag();
+      try {
+        await startPanelDrag();
+      } catch (error) {
+        markDragDone();
+        console.error("Panel drag failed", error);
+      }
     }
   }
 
