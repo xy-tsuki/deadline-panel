@@ -68,10 +68,12 @@
 :root[data-material="gpu-glass"] { --muted:rgba(255,255,255,.72); }
 :root[data-material="gpu-glass"][data-theme="light"] { --muted:rgba(0,0,0,.64); }
 
-.settings-window { position:relative; border-radius:14px; padding-top:54px; scrollbar-width:thin; scrollbar-color:var(--glass-rim-low) transparent; }
-.settings-window::-webkit-scrollbar,.expanded-panel::-webkit-scrollbar { width:6px; }
-.settings-window::-webkit-scrollbar-track,.expanded-panel::-webkit-scrollbar-track { background:transparent; margin:16px 0; }
-.settings-window::-webkit-scrollbar-thumb,.expanded-panel::-webkit-scrollbar-thumb { background:var(--glass-rim-low); border-radius:10px; }
+.settings-window { position:relative; border:1px solid transparent; border-radius:14px; padding-top:54px; overflow:hidden; }
+.settings-content { display:flow-root; transform:scale(var(--settings-content-scale,1)); transform-origin:top center; }
+.settings-window :is(.topn-segments,.liquid-text-segments) button { font-weight:600; }
+.expanded-panel::-webkit-scrollbar { width:6px; }
+.expanded-panel::-webkit-scrollbar-track { background:transparent; margin:16px 0; }
+.expanded-panel::-webkit-scrollbar-thumb { background:var(--glass-rim-low); border-radius:10px; }
 .settings-chrome { position:fixed; inset:0 0 auto; height:36px; display:flex; align-items:center; gap:14px; padding:0 12px; z-index:30; user-select:none; background:var(--glass-card); border-bottom:1px solid var(--glass-rim-low); border-radius:14px 14px 0 0; }
 .settings-chrome__controls { display:flex; gap:8px; align-items:center; }
 .settings-chrome__controls button,.settings-chrome__inactive { display:block; width:12px; height:12px; padding:0; border:0; border-radius:50%; }
@@ -96,6 +98,7 @@
 .settings-chrome__controls { height:36px; gap:0; }
 .settings-chrome__controls button { width:46px; height:36px; border-radius:0; background:transparent; color:var(--text); }
 .settings-chrome__controls button:hover { background:var(--glass-rim-low); }
+.settings-chrome__controls button:disabled { color:var(--subtle); opacity:.45; cursor:default; background:transparent; }
 .settings-chrome__controls .settings-chrome__close:hover { background:#c42b1c; color:white; }
 .settings-chrome__close { border-top-right-radius:14px !important; }
 .settings-content > h1 { margin:0 0 16px; font-size:22px; font-weight:600; }
@@ -135,10 +138,13 @@
 /* A white desktop needs visible neutral surfaces and opaque text, rather than
  * stacking white highlights and translucent gray labels. */
 :root[data-theme="dark"][data-material="compatibility"] {
-  --material-compat:rgba(22,22,24,.90);
+  --material-compat:rgba(22,22,24,.95);
 }
 :root[data-theme="dark"][data-material="compatibility"] .desktop-stage {
   --material-compat:rgba(22,22,24,.80);
+}
+:root[data-theme="dark"][data-material="compatibility"] .expanded-panel {
+  --material-compat:rgba(22,22,24,.85);
 }
 :root[data-theme="light"][data-material="compatibility"] {
   --text:#202c3c;

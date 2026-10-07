@@ -936,7 +936,7 @@ function TaskComposer() {
     const result = parseQuickAdd(quickInput);
     if (!result.ok || !result.input) {
       setQuickPreview(null);
-      setQuickMessage(result.error === "empty" ? ui.add.quickEmpty : ui.add.quickError);
+      setQuickMessage(result.error ? ui.add.quickErrors[result.error] : ui.add.quickError);
       return;
     }
 
@@ -1015,6 +1015,7 @@ function TaskComposer() {
                 <span>
                   {formatDue(quickPreview.dueAt, language)} · {priorityLabel[quickPreview.priority]}
                 </span>
+                {quickPreview.notes ? <p className="quick-preview-notes">{quickPreview.notes}</p> : null}
               </div>
               <button type="button" className="primary-button" disabled={isSaving} onClick={() => void handleQuickConfirm()}>
                 {ui.add.quickConfirm}

@@ -93,11 +93,22 @@ const strings = {
     },
     add: {
       title: "添加 Deadline",
-      quickPlaceholder: "明天 23:59 Graph Mining Quiz high",
+      quickPlaceholder: "明天下午3点半交报告 重要",
       quickParse: "解析",
       quickConfirm: "确认添加",
       quickEmpty: "先输入一句自然语言 Deadline",
       quickError: "无法识别，请写清标题和截止时间",
+      quickErrors: {
+        "empty": "先输入一句自然语言 Deadline",
+        "too-long": "内容太长，请每次输入一条简短任务",
+        "missing-date": "没有识别到日期或时间，例如：明天下午3点交报告",
+        "missing-title": "识别到了截止时间，请再写上任务标题",
+        "invalid-date": "日期无效，请检查月份、天数或闰年",
+        "invalid-time": "时间不明确或无效，请用如 下午3点半 或 18:30",
+        "ambiguous-date": "发现多个不同日期，请只保留这条任务的截止日期",
+        "ambiguous-time": "发现多个不同时间，请只保留这条任务的截止时间",
+        "unsupported-timezone": "快速解析按本机时区计算；带时区的时间请使用命令或 JSON 导入"
+      },
       quickReady: "已识别，可确认添加",
       manual: "手动填写"
     },
@@ -267,6 +278,17 @@ const strings = {
       quickConfirm: "確認して追加",
       quickEmpty: "自然文で Deadline を入力してください",
       quickError: "認識できません。タイトルと締切を明確にしてください",
+      quickErrors: {
+        "empty": "自然文で Deadline を入力してください",
+        "too-long": "一度に短いタスクを1件入力してください",
+        "missing-date": "日時がありません。例：明日午後3時にレポート提出",
+        "missing-title": "日時を認識しました。タスク名を入力してください",
+        "invalid-date": "日付が無効です。月・日・うるう年を確認してください",
+        "invalid-time": "時刻が不明確または無効です。例：午後3時半、18:30",
+        "ambiguous-date": "異なる日付が複数あります。締切を1つにしてください",
+        "ambiguous-time": "異なる時刻が複数あります。締切を1つにしてください",
+        "unsupported-timezone": "クイック解析は端末の時間帯を使用します。時間帯付き日時はコマンドまたはJSONで取り込んでください"
+      },
       quickReady: "認識しました。確認して追加できます",
       manual: "手動入力"
     },
@@ -436,6 +458,17 @@ const strings = {
       quickConfirm: "Confirm add",
       quickEmpty: "Type a natural-language deadline first",
       quickError: "Could not parse it. Include a clear title and due time",
+      quickErrors: {
+        "empty": "Type a natural-language deadline first",
+        "too-long": "Enter one short task at a time",
+        "missing-date": "No date or time found. Try: submit report tomorrow at 3pm",
+        "missing-title": "A due time was found. Include a task title",
+        "invalid-date": "Invalid date. Check the month, day and leap year",
+        "invalid-time": "Unclear or invalid time. Try 3:30pm or 18:30",
+        "ambiguous-date": "Multiple different dates found. Keep one deadline",
+        "ambiguous-time": "Multiple different times found. Keep one due time",
+        "unsupported-timezone": "Quick parsing uses your local timezone. Import timezone offsets through commands or JSON"
+      },
       quickReady: "Parsed. Review and confirm to add",
       manual: "Manual"
     },

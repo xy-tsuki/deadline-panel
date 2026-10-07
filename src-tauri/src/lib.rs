@@ -1,5 +1,7 @@
 mod notifications;
 #[cfg(windows)]
+mod autostart;
+#[cfg(windows)]
 mod material;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
@@ -98,7 +100,7 @@ const SEED_TASKS_V2_SETTING_KEY: &str = "seed_tasks_v2";
 const LONG_RUNTIME_RESTART_AFTER: Duration = Duration::from_secs(10 * 60 * 60);
 const LONG_RUNTIME_RESTART_RETRY: Duration = Duration::from_secs(5 * 60);
 #[cfg(windows)]
-const AUTOSTART_REG_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const AUTOSTART_REG_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(windows)]
 const AUTOSTART_REG_VALUE: &str = "Deadline Panel";
 
@@ -611,15 +613,24 @@ async fn open_settings_window(app: AppHandle, title: String) -> Result<(), Strin
         window.unminimize().map_err(|error| error.to_string())?;
         return window.set_focus().map_err(|error| error.to_string());
     }
+    let monitor = app.get_webview_window("main")
+        .and_then(|window| window.current_monitor().ok().flatten())
+        .or(app.primary_monitor().map_err(|error| error.to_string())?);
+    let (width, height) = monitor.map(|monitor| {
+        let area = monitor.work_area();
+        let scale = monitor.scale_factor();
+        ((area.size.width as f64 / scale - 24.0).clamp(320.0, 600.0),
+         (area.size.height as f64 / scale - 24.0).clamp(320.0, 900.0))
+    }).unwrap_or((600.0, 900.0));
     tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
         tauri::WebviewUrl::App("index.html?window=settings".into()),
     )
     .title(title)
-    .inner_size(600.0, 900.0)
-    .min_inner_size(480.0, 420.0)
-    .resizable(true)
+    .inner_size(width, height)
+    .resizable(false)
+    .maximizable(false)
     .decorations(false)
     .shadow(false)
     .transparent(true)
@@ -641,27 +652,8 @@ async fn settings_window_action(window: tauri::WebviewWindow, action: String) ->
         "hide" => window.hide(),
         "minimize" => window.minimize(),
         "drag" => window.start_dragging(),
-        "toggle-maximize" => {
-            if window.is_maximized().map_err(|error| error.to_string())? { window.unmaximize() } else { window.maximize() }
-        },
         _ => return Err("Unknown settings window action".into()),
     }.map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-async fn fit_settings_window(window: tauri::WebviewWindow, height: f64) -> Result<(), String> {
-    if window.label() != "settings" || !height.is_finite() { return Err("Invalid settings size request".into()); }
-    if window.is_maximized().map_err(|error| error.to_string())? { return Ok(()); }
-    let monitor = window.current_monitor().map_err(|error| error.to_string())?;
-    let scale = window.scale_factor().map_err(|error| error.to_string())?;
-    let limit = monitor.as_ref().map(|monitor| monitor.work_area().size.height as f64 / scale - 16.0).unwrap_or(900.0);
-    let target = height.clamp(420.0, limit.max(420.0));
-    let current = window.inner_size().map_err(|error| error.to_string())?;
-    if (current.height as f64 / scale - target).abs() > 1.0 {
-        window.set_size(tauri::LogicalSize::new(current.width as f64 / scale, target)).map_err(|error| error.to_string())?;
-        window.center().map_err(|error| error.to_string())?;
-    }
-    Ok(())
 }
 
 #[tauri::command]
@@ -1012,14 +1004,14 @@ fn quit_app(app: AppHandle) {
 }
 
 #[tauri::command]
-fn get_autostart_enabled() -> Result<bool, String> {
-    autostart_enabled().map_err(|error| error.to_string())
+fn get_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    autostart_enabled(&app).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn set_autostart_enabled(enabled: bool) -> Result<bool, String> {
-    set_autostart_enabled_native(enabled).map_err(|error| error.to_string())?;
-    autostart_enabled().map_err(|error| error.to_string())
+fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    set_autostart_enabled_native(&app, enabled).map_err(|error| error.to_string())?;
+    autostart_enabled(&app).map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1092,7 +1084,6 @@ pub fn run() {
             get_material_diagnostics,
             set_window_material,
             settings_window_action,
-            fit_settings_window,
             load_snapshot,
             get_app_settings,
             set_app_settings,
@@ -1422,61 +1413,31 @@ fn normalized_windows_path(path: &std::path::Path) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+fn autostart_enabled(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     let exe_path = current_exe_for_shell()?;
-    let output = Command::new("reg")
-        .args(["query", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE])
-        .output()?;
-
-    if !output.status.success() {
-        return Ok(false);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
-    Ok(stdout.contains(&exe_path.to_ascii_lowercase()))
+    Ok(autostart::read(AUTOSTART_REG_KEY, &autostart_value_name(app))?
+        .is_some_and(|value| autostart::matches_executable(&value, &exe_path)))
 }
 
 #[cfg(not(windows))]
-fn autostart_enabled() -> Result<bool, Box<dyn std::error::Error>> {
+fn autostart_enabled(_app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     Ok(false)
 }
 
 #[cfg(windows)]
-fn set_autostart_enabled_native(enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
-    if enabled {
-        let value = format!("\"{}\"", current_exe_for_shell()?);
-        let status = Command::new("reg")
-            .args([
-                "add",
-                AUTOSTART_REG_KEY,
-                "/v",
-                AUTOSTART_REG_VALUE,
-                "/t",
-                "REG_SZ",
-                "/d",
-                value.as_str(),
-                "/f",
-            ])
-            .status()?;
+fn set_autostart_enabled_native(app: &AppHandle, enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let value = enabled.then(|| current_exe_for_shell().map(|path| format!("\"{path}\""))).transpose()?;
+    autostart::write(AUTOSTART_REG_KEY, &autostart_value_name(app), value.as_deref())
+}
 
-        if !status.success() {
-            return Err("failed to write startup registry value".into());
-        }
-    } else {
-        let status = Command::new("reg")
-            .args(["delete", AUTOSTART_REG_KEY, "/v", AUTOSTART_REG_VALUE, "/f"])
-            .status()?;
-
-        if !status.success() && autostart_enabled()? {
-            return Err("failed to remove startup registry value".into());
-        }
-    }
-
-    Ok(())
+#[cfg(windows)]
+fn autostart_value_name(app: &AppHandle) -> String {
+    if app.config().identifier == "local.adhd-deadline-panel" { AUTOSTART_REG_VALUE.into() }
+    else { format!("{} ({})", AUTOSTART_REG_VALUE, app.config().identifier) }
 }
 
 #[cfg(not(windows))]
-fn set_autostart_enabled_native(_enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn set_autostart_enabled_native(_app: &AppHandle, _enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 

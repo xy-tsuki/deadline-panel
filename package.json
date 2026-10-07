@@ -10,7 +10,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/build-release.mjs",
     "updater:json": "node scripts/make-latest-json.mjs",
-    "test": "node scripts/test-sync.mjs && node scripts/test-migration.mjs && node scripts/test-transport.mjs"
+    "test": "node scripts/test-sync.mjs && node scripts/test-migration.mjs && node scripts/test-transport.mjs && node scripts/test-quick-add.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

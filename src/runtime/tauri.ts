@@ -203,11 +203,7 @@ export async function setWindowMaterial(dark: boolean, lowPower = false): Promis
   return isTauriRuntime() ? invoke<string>("set_window_material", { dark, lowPower }) : "compatibility";
 }
 
-export async function fitSettingsWindow(height: number): Promise<void> {
-  if (isTauriRuntime()) await invoke("fit_settings_window", { height });
-}
-
-export async function settingsWindowAction(action: "hide" | "minimize" | "drag" | "toggle-maximize"): Promise<void> {
+export async function settingsWindowAction(action: "hide" | "minimize" | "drag"): Promise<void> {
   if (isTauriRuntime()) await invoke("settings_window_action", { action });
 }
 
