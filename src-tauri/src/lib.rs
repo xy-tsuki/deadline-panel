@@ -33,6 +33,7 @@ use windows::Win32::{
     },
     UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON},
     UI::WindowsAndMessaging::{
+        BeginDeferWindowPos, DeferWindowPos, EndDeferWindowPos,
         GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect,
         GetWindowThreadProcessId, IsIconic, IsWindowVisible, SetWindowPos, GW_HWNDPREV,
         SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
@@ -747,8 +748,15 @@ fn set_panel_expanded(
         let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
         let previous_open_down = panel.open_down;
         let was_expanded = panel.expanded;
-        // Reject a late hover request delivered after a hide or drag started.
-        panel.expanded = expanded && panel.visibility().visible && !panel.dragging;
+        // Hover/leave callbacks must not change expansion during a drag.
+        // Explicit hide operations use their own visibility commands.
+        if panel.dragging {
+            return Ok(PanelExpandResult {
+                direction: if panel.open_down { "down" } else { "up" },
+                expanded: panel.expanded,
+            });
+        }
+        panel.expanded = expanded && panel.visibility().visible;
         (previous_open_down, was_expanded, panel.expanded)
     };
 
@@ -998,22 +1006,25 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
         return Ok(());
     };
 
-    {
+    let expanded = {
         let state = app.state::<AppState>();
-        let mut panel = state.panel.lock().map_err(|error| error.to_string())?;
+        let panel = state.panel.lock().map_err(|error| error.to_string())?;
         if panel.dragging {
             return Ok(());
         }
-        panel.dragging = true;
-        panel.expanded = false;
-    }
-    if let Some(panel_window) = app.get_webview_window("panel") {
-        let _ = panel_window.hide();
-    }
+        panel.expanded
+    };
 
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
     let hwnd_value = hwnd.0 as isize;
     let start_position = window.outer_position().map_err(|error| error.to_string())?;
+    let linked_panel = if expanded {
+        if let Some(panel_window) = app.get_webview_window("panel") {
+            let position = panel_window.outer_position().map_err(|error| error.to_string())?;
+            Some((panel_window.hwnd().map_err(|error| error.to_string())?.0 as isize,
+                position.x - start_position.x, position.y - start_position.y))
+        } else { None }
+    } else { None };
     let mut start_cursor = POINT::default();
     unsafe { GetCursorPos(&mut start_cursor).map_err(|error| error.to_string())? };
 
@@ -1023,11 +1034,17 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
     window
         .set_focusable(true)
         .map_err(|error| error.to_string())?;
+    {
+        let state = app.state::<AppState>();
+        state.panel.lock().map_err(|error| error.to_string())?.dragging = true;
+    }
 
+    let drag_app = app.clone();
     thread::spawn(move || {
         run_panel_drag_loop(
-            app,
+            drag_app,
             hwnd_value,
+            linked_panel,
             start_position.x,
             start_position.y,
             start_cursor.x,
@@ -1035,7 +1052,7 @@ fn start_panel_drag(app: AppHandle) -> Result<(), String> {
         );
     });
 
-    Ok(())
+    emit_panel_visibility(&app)
 }
 
 #[tauri::command]
@@ -2173,6 +2190,7 @@ fn get_panel_pointer_state(
 fn run_panel_drag_loop(
     app: AppHandle,
     hwnd_value: isize,
+    linked_panel: Option<(isize, i32, i32)>,
     start_window_x: i32,
     start_window_y: i32,
     start_cursor_x: i32,
@@ -2191,9 +2209,32 @@ fn run_panel_drag_loop(
 
         let mut cursor = POINT::default();
         if unsafe { GetCursorPos(&mut cursor) }.is_ok() {
-            final_x = start_window_x + (cursor.x - start_cursor_x);
-            final_y = start_window_y + (cursor.y - start_cursor_y);
-            let _ = unsafe { SetWindowPos(hwnd, None, final_x, final_y, 0, 0, flags) };
+            let next_x = start_window_x + (cursor.x - start_cursor_x);
+            let next_y = start_window_y + (cursor.y - start_cursor_y);
+            if next_x != final_x || next_y != final_y {
+                final_x = next_x;
+                final_y = next_y;
+                // Apply both top-level window positions in one native batch.
+                // Keep their relative offset and size throughout the gesture.
+                let batch = (|| -> windows::core::Result<()> {
+                    unsafe {
+                        let mut positions = BeginDeferWindowPos(if linked_panel.is_some() { 2 } else { 1 })?;
+                        positions = DeferWindowPos(positions, hwnd, None, final_x, final_y, 0, 0, flags)?;
+                        if let Some((panel_hwnd, offset_x, offset_y)) = linked_panel {
+                            positions = DeferWindowPos(positions, HWND(panel_hwnd as *mut _), None,
+                                final_x + offset_x, final_y + offset_y, 0, 0, flags)?;
+                        }
+                        EndDeferWindowPos(positions)
+                    }
+                })();
+                if batch.is_err() {
+                    let _ = unsafe { SetWindowPos(hwnd, None, final_x, final_y, 0, 0, flags) };
+                    if let Some((panel_hwnd, offset_x, offset_y)) = linked_panel {
+                        let _ = unsafe { SetWindowPos(HWND(panel_hwnd as *mut _), None,
+                            final_x + offset_x, final_y + offset_y, 0, 0, flags) };
+                    }
+                }
+            }
         }
 
         thread::sleep(Duration::from_millis(8));
@@ -2215,16 +2256,11 @@ fn run_panel_drag_loop(
         } else {
             false
         };
-        if let Some(panel_window) = main_app.get_webview_window("panel") {
-            let _ = panel_window.hide();
-            let _ = panel_window.set_focusable(false);
-        }
-
-        if let Ok(mut panel) = state.panel.lock() {
+        let expanded = if let Ok(mut panel) = state.panel.lock() {
             panel.dragging = false;
             panel.open_down = next_open_down;
-            panel.expanded = false;
-        }
+            panel.expanded && panel.visibility().visible
+        } else { false };
 
         if let Some(window) = main_app.get_webview_window("main") {
             if let Ok(current_position) = window.outer_position() {
@@ -2237,6 +2273,13 @@ fn run_panel_drag_loop(
         if let Some(window) = main_app.get_webview_window("main") {
             let _ = window.set_focusable(false);
             let _ = window.set_ignore_cursor_events(false);
+            if expanded {
+                if let Some(panel_window) = main_app.get_webview_window("panel") {
+                    // Refit to the destination work area after release, while
+                    // preserving the expanded state and keeping it visible.
+                    let _ = position_expanded_panel(&window, &panel_window, final_x, final_y, next_open_down);
+                }
+            }
         }
         let _ = emit_panel_visibility(&main_app);
     });

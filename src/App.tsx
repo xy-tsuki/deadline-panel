@@ -305,7 +305,7 @@ export function App() {
       isDraggingPanelRef.current = state.dragging;
       setIsExpanded(state.expanded);
       setExpandDirection(state.direction);
-      if (!state.expanded) {
+      if (state.dragging || !state.expanded) {
         clearCollapseTimer();
         clearAnimationTimer();
         clearCollapsedHoverTimer();
@@ -349,6 +349,7 @@ export function App() {
 
   function scheduleCollapseWhenPointerLeavesWindow(delayMs = COLLAPSE_DELAY_MS) {
     clearCollapseTimer();
+    if (isDraggingPanelRef.current) return;
     collapseTimerRef.current = window.setTimeout(() => {
       collapseTimerRef.current = null;
       void collapseIfPointerOutsideWindow();
@@ -356,6 +357,7 @@ export function App() {
   }
 
   async function collapseIfPointerOutsideWindow() {
+    if (isDraggingPanelRef.current) return;
     if (hasPendingPanelInteraction()) { scheduleCollapseWhenPointerLeavesWindow(); return; }
     if (document.activeElement instanceof HTMLElement && document.activeElement.matches("input, textarea, select, [contenteditable=true]")) return;
     if (isTauriRuntime()) {
@@ -385,6 +387,7 @@ export function App() {
   }
 
   function collapsePanel() {
+    if (isDraggingPanelRef.current) return;
     clearAnimationTimer();
     setIsExpanded(false);
     void (async () => {
@@ -476,9 +479,7 @@ export function App() {
     window.addEventListener("pointerup", markDragDone, { once: true });
     window.addEventListener("mouseup", markDragDone, { once: true });
 
-    // The native drag entry collapses the panel and starts dragging together.
-    // A separate collapse broadcasts dragging=false and cancels this gesture.
-    setIsExpanded(false);
+    // The native drag entry preserves expansion and moves both windows.
     if (isDraggingPanelRef.current) {
       try {
         await startPanelDrag();
