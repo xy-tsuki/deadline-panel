@@ -7,7 +7,25 @@ src-tauri/target/
 src-tauri/gen/
 src-tauri/updater.key
 .codex/
+.claude/settings.local.json
+
+# 密钥和证书
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+
+# 系统和编辑器
 .DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
 *.local
 *.log
 npm-debug.log*
