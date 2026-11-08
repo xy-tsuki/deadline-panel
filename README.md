@@ -1,8 +1,12 @@
 # Deadline Panel
 
+中文 | [English](README.en.md)
+
 Deadline Panel 是一个 ADHD 友好的 Windows 桌面常驻 Deadline 看板。
 
 它是一个低干扰、始终可见的环境提示工具：在电脑右下角常驻一个小信息条，提醒你现在正在做什么、最近的 Deadline 是什么、还剩多久。
+
+![Deadline Panel 界面示意：右下角折叠信息条与展开后的面板](docs/assets/ui-concept.png)
 
 ## 核心目标
 
@@ -32,6 +36,21 @@ Deadline Panel 仅通过常驻提示，让你在使用电脑时，时刻都不�
 - 命令导入预览
 - JSON 导入导出
 - 可选 Supabase 云同步
+
+## 安装
+
+从 [Releases](https://github.com/xy-tsuki/deadline-panel/releases) 下载安装包：Windows 选 `*_x64-setup.exe`，macOS（Apple Silicon）选 `*-macOS-arm64.dmg`。
+
+## 本地开发
+
+需要 Node.js 和 Rust（Tauri 2 的依赖见 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/)）。
+
+```bash
+npm install
+npm run tauri:dev   # 启动桌面应用（开发模式）
+npm test            # 运行测试
+npm run tauri:build # 打包发布版本
+```
 
 ## 命令导入格式
 

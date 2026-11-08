@@ -1,8 +1,12 @@
 # Deadline Panel
 
+[中文](README.md) | English
+
 Deadline Panel is an ADHD-friendly, always-on desktop deadline board for Windows.
 
 It is a low-distraction, always-visible environmental cue: a small information strip stays in the lower-right corner of your screen and reminds you what you are doing now, what the nearest deadline is, and how much time is left.
+
+![Deadline Panel UI concept: collapsed strip in the lower-right corner and the expanded panel](docs/assets/ui-concept.png)
 
 ## Core Goal
 
@@ -32,6 +36,21 @@ Deadline Panel uses only a persistent visual cue, so while you are using your co
 - Command import preview
 - JSON import and export
 - Optional Supabase cloud sync
+
+## Installation
+
+Download an installer from [Releases](https://github.com/xy-tsuki/deadline-panel/releases): `*_x64-setup.exe` for Windows, `*-macOS-arm64.dmg` for macOS (Apple Silicon).
+
+## Development
+
+Requires Node.js and Rust (see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)).
+
+```bash
+npm install
+npm run tauri:dev   # run the desktop app in development mode
+npm test            # run tests
+npm run tauri:build # build a release
+```
 
 ## Command Import Format
 
