@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { webcrypto } from "node:crypto";
-globalThis.crypto = webcrypto;
+// Node 19+ 自带只读的 globalThis.crypto，只有缺失时（Node 18）才补上
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 async function load(file) {
   const source = readFileSync(new URL(file, import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "");
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;

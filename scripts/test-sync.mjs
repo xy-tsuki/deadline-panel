@@ -21,7 +21,8 @@ globalThis.__syncTest = {
   } })
 };
 const { webcrypto } = await import("node:crypto");
-globalThis.crypto = webcrypto;
+// Node 19+ 自带只读的 globalThis.crypto，只有缺失时（Node 18）才补上
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
 let source = readFileSync(new URL("../src/sync/supabaseSync.ts", import.meta.url), "utf8").replace(/^import .*;\r?\n/gm, "").replaceAll("import.meta.env", "({})");
 source = 'const fetchWithTimeout = () => {}, DEFAULT_PUBLIC_SYNC_URL = "", DEFAULT_PUBLIC_SYNC_ANON_KEY = "";\n' + "const { createClient, loadSetting, saveSetting, loadSettings, saveSettings, loadPendingDeletes, acknowledgeDelete } = globalThis.__syncTest;\n" + source;
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
