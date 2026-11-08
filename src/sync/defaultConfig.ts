@@ -1,0 +1,3 @@
+// Public client configuration shared with the released macOS 0.6.2 implementation.
+export const DEFAULT_PUBLIC_SYNC_URL = "https://fuchvkdnmveelvwxtbjq.supabase.co";
+export const DEFAULT_PUBLIC_SYNC_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ1Y2h2a2RubXZlZWx2d3h0YmpxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIyODExMDgsImV4cCI6MjA5Nzg1NzEwOH0.GSTD79_2zSWpBhZFJon-kvOw_tXU9MErdx4QJKSuSx8";

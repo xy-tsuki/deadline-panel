@@ -1,12 +1,15 @@
+import { DEFAULT_PUBLIC_SYNC_URL, DEFAULT_PUBLIC_SYNC_ANON_KEY } from "./defaultConfig";
+import { fetchWithTimeout } from "./transport";
+import { loadSettings, saveSettings } from "../storage/storage";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { DeadlineTask } from "../domain/task";
-import { loadSetting, saveSetting } from "../storage/storage";
+import { acknowledgeDelete, loadPendingDeletes } from "../storage/storage";
 
 const SUPABASE_URL_KEY = "sync_supabase_url";
 const SUPABASE_ANON_KEY = "sync_supabase_anon_key";
 const SUPABASE_CODE_KEY = "sync_code";
-const DEFAULT_SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL?.trim() ?? "");
-const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? "";
+const DEFAULT_SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL?.trim() || DEFAULT_PUBLIC_SYNC_URL);
+const DEFAULT_SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || DEFAULT_PUBLIC_SYNC_ANON_KEY;
 
 export interface SupabaseSyncSettings {
   url: string;
@@ -32,21 +35,18 @@ let cachedClient: SupabaseClient | null = null;
 let cachedKey = "";
 
 export async function loadSupabaseSyncSettings(): Promise<SupabaseSyncSettings> {
-  const customUrl = (await loadSetting(SUPABASE_URL_KEY).catch(() => null)) ?? "";
-  const customAnonKey = (await loadSetting(SUPABASE_ANON_KEY).catch(() => null)) ?? "";
+  const values = await loadSettings([SUPABASE_URL_KEY, SUPABASE_ANON_KEY, SUPABASE_CODE_KEY]);
+  const customUrl = values[SUPABASE_URL_KEY] ?? "";
+  const customAnonKey = values[SUPABASE_ANON_KEY] ?? "";
   return {
     url: normalizeSupabaseUrl(customUrl) || DEFAULT_SUPABASE_URL,
     anonKey: customAnonKey || DEFAULT_SUPABASE_ANON_KEY,
-    syncCode: (await loadSetting(SUPABASE_CODE_KEY).catch(() => null)) ?? ""
+    syncCode: values[SUPABASE_CODE_KEY] ?? ""
   };
 }
 
 export async function saveSupabaseSyncSettings(settings: SupabaseSyncSettings): Promise<void> {
-  await Promise.all([
-    saveSetting(SUPABASE_URL_KEY, normalizeSupabaseUrl(settings.url)),
-    saveSetting(SUPABASE_ANON_KEY, settings.anonKey.trim()),
-    saveSetting(SUPABASE_CODE_KEY, settings.syncCode.trim())
-  ]);
+  await saveSettings({ [SUPABASE_URL_KEY]: normalizeSupabaseUrl(settings.url), [SUPABASE_ANON_KEY]: settings.anonKey.trim(), [SUPABASE_CODE_KEY]: settings.syncCode.trim() });
   clearCachedClient();
 }
 
@@ -65,12 +65,22 @@ export function clearCachedClient(): void {
   cachedKey = "";
 }
 
-export async function syncTasksWithSupabase(localTasks: DeadlineTask[]): Promise<DeadlineTask[]> {
-  const { client, codeHash } = await getConfiguredSyncContext();
+export async function syncTasksWithSupabase(localTasks: DeadlineTask[]): Promise<{ tasks: DeadlineTask[]; assertCurrent: () => Promise<void>; upload: () => Promise<void> }> {
+  const { client, codeHash, namespace, settings } = await getConfiguredSyncContext();
+  const assertCurrent = async () => { const current = await loadSupabaseSyncSettings(); if (current.url !== settings.url || current.anonKey !== settings.anonKey || current.syncCode !== settings.syncCode) throw new Error("sync_context_changed"); };
+  const pending = await loadPendingDeletes(namespace);
+  for (const id of pending) {
+    const { error } = await client.rpc("deadline_sync_delete", { p_sync_code_hash: codeHash, p_task_id: id });
+    if (error) throw error;
+    await acknowledgeDelete(namespace, id);
+  }
   const remoteTasks = await fetchRemoteTasks(client, codeHash);
-  const mergedTasks = mergeTasks(localTasks, remoteTasks);
-  await upsertTasks(client, codeHash, mergedTasks);
-  return mergedTasks;
+  const { data: deleted, error: deletedError } = await client.rpc("deadline_sync_pull_deleted", { p_sync_code_hash: codeHash });
+  if (deletedError) throw new Error("Cloud tombstone protocol unavailable: " + deletedError.message);
+  const deletedIds = new Set(((deleted ?? []) as { task_id: string }[]).map((row) => row.task_id));
+  for (const id of pending) deletedIds.add(id);
+  const mergedTasks = mergeTasks(localTasks, remoteTasks).filter((task) => !deletedIds.has(task.id));
+  return { tasks: mergedTasks, assertCurrent, upload: async () => { await assertCurrent(); await upsertTasks(client, codeHash, mergedTasks); } };
 }
 
 export async function pushTaskToSupabase(task: DeadlineTask): Promise<void> {
@@ -97,15 +107,13 @@ export async function deleteTaskFromSupabase(id: string): Promise<void> {
   if (error) throw error;
 }
 
-async function getConfiguredSyncContext(): Promise<{ client: SupabaseClient; codeHash: string }> {
+async function getConfiguredSyncContext(): Promise<{ client: SupabaseClient; codeHash: string; namespace: string; settings: SupabaseSyncSettings }> {
   const settings = await loadSupabaseSyncSettings();
   if (!settings.url || !settings.anonKey || !settings.syncCode) {
     throw new Error("Supabase sync is not configured.");
   }
-  return {
-    client: getClient(settings),
-    codeHash: await hashSyncCode(settings.syncCode)
-  };
+  const codeHash = await hashSyncCode(settings.syncCode);
+  return { client: getClient(settings), codeHash, namespace: settings.url + "|" + codeHash, settings };
 }
 
 async function getOptionalSyncContext(): Promise<{ client: SupabaseClient; codeHash: string } | null> {
@@ -125,6 +133,7 @@ function getClient(settings: SupabaseSyncSettings): SupabaseClient {
   }
 
   cachedClient = createClient(url, settings.anonKey, {
+    global: { fetch: fetchWithTimeout },
     auth: {
       persistSession: false,
       autoRefreshToken: false
@@ -152,15 +161,17 @@ async function upsertTasks(client: SupabaseClient, codeHash: string, tasks: Dead
   if (error) throw error;
 }
 
-function mergeTasks(localTasks: DeadlineTask[], remoteTasks: DeadlineTask[]): DeadlineTask[] {
+export function mergeTasks(localTasks: DeadlineTask[], remoteTasks: DeadlineTask[]): DeadlineTask[] {
   const merged = new Map<string, DeadlineTask>();
   for (const task of remoteTasks) {
+    parseDate(task.updatedAt);
     merged.set(task.id, task);
   }
 
   for (const task of localTasks) {
+    parseDate(task.updatedAt);
     const remote = merged.get(task.id);
-    if (!remote || compareUpdatedAt(task, remote) >= 0) {
+    if (!remote || compareUpdatedAt(task, remote) > 0) {
       merged.set(task.id, task);
     }
   }
@@ -174,7 +185,8 @@ function compareUpdatedAt(left: DeadlineTask, right: DeadlineTask): number {
 
 function parseDate(value: string): number {
   const time = new Date(value).getTime();
-  return Number.isNaN(time) ? 0 : time;
+  if (!Number.isFinite(time)) throw new Error(`Invalid task timestamp: ${value}`);
+  return time;
 }
 
 function taskToRow(task: DeadlineTask): DeadlineTaskRow {
@@ -232,4 +244,9 @@ function normalizeSupabaseUrl(value: string): string {
   } catch {
     return trimmed;
   }
+}
+
+export async function getSyncNamespace(): Promise<string | undefined> {
+  const settings = await loadSupabaseSyncSettings();
+  return settings.url && settings.anonKey && settings.syncCode ? settings.url + "|" + await hashSyncCode(settings.syncCode) : undefined;
 }

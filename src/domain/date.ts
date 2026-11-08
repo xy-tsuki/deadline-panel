@@ -1,4 +1,5 @@
 import { AppLanguage, getStrings, localeForLanguage } from "../i18n";
+const formatters = new Map<string, Intl.DateTimeFormat>();
 
 export function formatDue(isoDate: string, language: AppLanguage = "zh"): string {
   const date = new Date(isoDate);
@@ -6,14 +7,17 @@ export function formatDue(isoDate: string, language: AppLanguage = "zh"): string
     return isoDate;
   }
 
-  return new Intl.DateTimeFormat(localeForLanguage(language), {
+  const locale = localeForLanguage(language);
+  let formatter = formatters.get(locale);
+  if (!formatter) { formatter = new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
-  })
+  }); formatters.set(locale, formatter); }
+  return formatter
     .format(date)
     .replace(/\//g, "-");
 }

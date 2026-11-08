@@ -6,6 +6,16 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const packageJson = JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8"));
 const version = packageJson.version;
 const repo = "xy-tsuki/deadline-panel";
+const args = process.argv.slice(2);
+function argument(name, fallback) {
+  const index = args.indexOf(name);
+  if (index < 0) return fallback;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`Missing value for ${name}`);
+  return value;
+}
+// Windows candidates use their own release tag; v<version> belongs to macOS.
+const releaseTag = argument("--release-tag", `windows-v${version}`);
 const bundleDir = path.join(rootDir, "src-tauri", "target", "release", "bundle", "nsis");
 const setupName = `Deadline Panel_${version}_x64-setup.exe`;
 const setupPath = path.join(bundleDir, setupName);
@@ -28,23 +38,22 @@ const releaseAssetName = setupName.replaceAll(" ", ".");
 const assetName = encodeURIComponent(releaseAssetName);
 const manifest = {
   version,
-  notes: `Deadline Panel v${version}`,
+  notes: `Deadline Panel v${version} for Windows`,
   pub_date: new Date().toISOString(),
   platforms: {
     "windows-x86_64": {
       signature: readFileSync(signaturePath, "utf8").trim(),
-      url: `https://github.com/${repo}/releases/download/v${version}/${assetName}`
+      url: `https://github.com/${repo}/releases/download/${encodeURIComponent(releaseTag)}/${assetName}`
     }
   }
 };
 
 const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-const bundleOutputPath = path.join(bundleDir, "latest.json");
-const repoOutputDir = path.join(rootDir, "updates");
-const repoOutputPath = path.join(repoOutputDir, "latest.json");
-
-mkdirSync(repoOutputDir, { recursive: true });
-writeFileSync(bundleOutputPath, manifestText, "utf8");
-writeFileSync(repoOutputPath, manifestText, "utf8");
-console.log(`Wrote updater manifest: ${bundleOutputPath}`);
-console.log(`Wrote repository updater manifest: ${repoOutputPath}`);
+const outputPath = path.resolve(rootDir, argument("--output", path.join(bundleDir, "latest-candidate.json")));
+const productionPath = path.join(rootDir, "updates", "latest.json");
+if (outputPath.toLowerCase() === productionPath.toLowerCase()) {
+  throw new Error("Generate a candidate file, then review the production manifest separately.");
+}
+mkdirSync(path.dirname(outputPath), { recursive: true });
+writeFileSync(outputPath, manifestText, "utf8");
+console.log(`Wrote candidate updater manifest: ${outputPath}`);

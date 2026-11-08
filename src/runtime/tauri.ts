@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emitTo } from "@tauri-apps/api/event";
 
 export interface PanelPointerState {
   inTrigger: boolean;
@@ -14,6 +15,24 @@ export interface PanelPointerState {
 
 export interface PanelExpandResult {
   direction: "up" | "down";
+  expanded?: boolean;
+}
+
+export interface PanelVisibility {
+  visible: boolean;
+  manualHidden: boolean;
+  autoHidden: boolean;
+  expanded: boolean;
+  dragging: boolean;
+  direction: "up" | "down";
+}
+
+export async function getPanelVisibility(): Promise<PanelVisibility> {
+  return invoke<PanelVisibility>("get_panel_visibility");
+}
+
+export async function restartApp(): Promise<void> {
+  if (isTauriRuntime()) await invoke("restart_app");
 }
 
 export function isTauriRuntime(): boolean {
@@ -25,7 +44,9 @@ export async function setPanelExpanded(expanded: boolean): Promise<PanelExpandRe
     return { direction: "up" };
   }
 
-  return invoke<PanelExpandResult>("set_panel_expanded", { expanded });
+  const result = await invoke<PanelExpandResult>("set_panel_expanded", { expanded });
+  await emitTo("panel", "deadline-panel-direction", result.direction);
+  return result;
 }
 
 export async function getPanelExpandDirection(): Promise<PanelExpandResult> {
@@ -186,4 +207,28 @@ export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
   }
 
   return invoke<boolean>("set_autostart_enabled", { enabled });
+}
+
+export async function openSettingsWindow(title: string): Promise<void> {
+  if (isTauriRuntime()) await invoke("open_settings_window", { title });
+}
+
+export async function showPanel(): Promise<void> {
+  if (isTauriRuntime()) await invoke("show_panel");
+}
+
+export async function setWindowMaterial(dark: boolean, lowPower = false): Promise<string> {
+  return isTauriRuntime() ? invoke<string>("set_window_material", { dark, lowPower }) : "compatibility";
+}
+
+export async function settingsWindowAction(action: "hide" | "minimize" | "drag"): Promise<void> {
+  if (isTauriRuntime()) await invoke("settings_window_action", { action });
+}
+
+export async function getSystemLanguage(): Promise<string> {
+  return isTauriRuntime() ? invoke<string>("system_language") : navigator.language;
+}
+
+export async function scheduleNotifications(): Promise<number> {
+  return invoke<number>("schedule_notifications");
 }

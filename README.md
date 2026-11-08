@@ -1,8 +1,14 @@
 # Deadline Panel
 
-Deadline Panel 是一个 ADHD 友好的 Windows 桌面常驻 Deadline 看板。
+中文 | [English](README.en.md)
+
+Deadline Panel 是一个 ADHD 友好的 Windows / macOS 桌面常驻 Deadline 看板。
 
 它是一个低干扰、始终可见的环境提示工具：在电脑右下角常驻一个小信息条，提醒你现在正在做什么、最近的 Deadline 是什么、还剩多久。
+
+| 折叠信息条 | 展开面板 |
+| --- | --- |
+| ![折叠状态的信息条](docs/assets/screenshot-strip.png) | <img src="docs/assets/screenshot-panel.png" alt="鼠标靠近后展开的面板" width="372"> |
 
 ## 核心目标
 
@@ -33,6 +39,21 @@ Deadline Panel 仅通过常驻提示，让你在使用电脑时，时刻都不�
 - JSON 导入导出
 - 可选 Supabase 云同步
 
+## 安装
+
+从 [Releases](https://github.com/xy-tsuki/deadline-panel/releases) 下载安装包：Windows 选 `*_x64-setup.exe`，macOS（Apple Silicon）选 `*-macOS-arm64.dmg`。
+
+## 本地开发
+
+需要 Node.js 和 Rust（Tauri 2 的依赖见 [Tauri 官方文档](https://v2.tauri.app/start/prerequisites/)）。
+
+```bash
+npm install
+npm run tauri:dev   # 启动桌面应用（开发模式）
+npm test            # 运行测试
+npm run tauri:build # 打包发布版本
+```
+
 ## 命令导入格式
 
 支持从 ChatGPT / Gemini / 其他工具生成 `"/add"` 命令后导入：
@@ -52,7 +73,7 @@ Deadline Panel 仅通过常驻提示，让你在使用电脑时，时刻都不�
 2. 复制同步码。
 3. 在另一台设备粘贴同一个同步码。
 4. 点击“立即同步”进行首次合并同步。
-5. 高级用户也可使用自己的 Supabase 项目。
+5. 高级用户也可使用自己的 Supabase 项目：在 SQL Editor 里执行 [`supabase/schema.sql`](supabase/schema.sql)。从 0.5.x 及更早版本升级到 0.6.2 时，需要把这个文件重新执行一遍（会保留已有数据），否则同步会失败。
 
 ## 技术栈
 
