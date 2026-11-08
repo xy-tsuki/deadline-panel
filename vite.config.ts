@@ -5,8 +5,10 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
+    host: "127.0.0.1",
     port: 1420,
-    strictPort: false
+    strictPort: true,
+    watch: { ignored: ["**/.codex-local/**", "**/src-tauri/**", "**/.playwright-cli/**", "**/output/**"] }
   },
   envPrefix: ["VITE_", "TAURI_"]
 });

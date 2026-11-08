@@ -1,0 +1,105 @@
+/* Geometry and surface parameters transcribed from macOS v0.6.2.
+ * These DOM surfaces do not claim to sample desktop pixels. */
+:root {
+  --text:rgba(255,255,255,.90);
+  --muted:rgba(255,255,255,.60);
+  --subtle:rgba(255,255,255,.45);
+  color-scheme:dark;
+  --field-bg:rgba(8,11,15,.62);
+  --popup-bg:rgba(17,21,28,.98);
+  --material-compat:rgba(24,24,26,.88);
+  --glass-tint: rgba(255,255,255,.10);
+  --glass-edge: rgba(255,255,255,.24);
+  --glass-highlight: rgba(255,255,255,.20);
+  --glass-tail: rgba(255,255,255,.06);
+  --glass-shadow: rgba(0,0,0,.28);
+  --glass-glow: rgba(255,255,255,.04);
+}
+:root[data-theme="light"] {
+  --text:rgba(0,0,0,.76);
+  --muted:rgba(0,0,0,.55);
+  --subtle:rgba(0,0,0,.45);
+  --field-bg:rgba(255,255,255,.62);
+  --popup-bg:rgba(247,247,249,.98);
+  --material-compat:rgba(244,244,246,.88);
+  --glass-tint: rgba(255,255,255,.16);
+  --glass-edge: rgba(255,255,255,.36);
+  --glass-highlight: rgba(255,255,255,.34);
+  --glass-tail: rgba(255,255,255,.10);
+  --glass-shadow: rgba(0,0,0,.16);
+  --glass-glow: rgba(255,255,255,.10);
+}
+.collapsed-strip { height: 44px; min-height: 44px; padding: 0 18px; gap: 12px; border-radius:14px; }
+.collapsed-strip,.expanded-panel,.settings-window { background:var(--material-compat); }
+:root[data-material="acrylic-requested"] .collapsed-strip,
+:root[data-material="acrylic-requested"] .expanded-panel {
+  background:linear-gradient(rgba(255,255,255,.06),transparent 24px),rgba(0,0,0,.15);
+  border:1px solid rgba(255,255,255,.12);
+}
+:root[data-theme="light"][data-material="acrylic-requested"] .collapsed-strip,
+:root[data-theme="light"][data-material="acrylic-requested"] .expanded-panel {
+  background:linear-gradient(rgba(255,255,255,.15),transparent 24px),rgba(255,255,255,.20);
+  border-color:rgba(255,255,255,.20);
+}
+:root[data-material="acrylic-requested"] .settings-window { background:rgba(0,0,0,.15); }
+:root[data-theme="light"][data-material="acrylic-requested"] .settings-window { background:rgba(255,255,255,.20); }
+.expanded-panel { padding: 0 12px; }
+.task-form input,.task-form textarea,.task-form select,.inline-edit { background:var(--field-bg); color:var(--text); color-scheme:inherit; }
+.priority-menu,.postpone-menu,.settings-submenu { background:var(--popup-bg); color:var(--text); }
+input,select,textarea { accent-color:var(--accent); }
+.expanded-panel .panel-section { padding: 13px 3px; }
+.expanded-panel .panel-section--focus { padding: 13px 3px; }
+.section-label { font-size:14px; font-weight:600; }
+.panel-section h1 { font-size:21px; }
+.icon-button, .text-button, .add-toggle, .primary-button,
+.liquid-text-segments, .topn-segments {
+  border:1px solid var(--glass-edge);
+  background:linear-gradient(180deg,var(--glass-highlight),var(--glass-tail) 24px,transparent 45px),var(--glass-tint);
+  box-shadow:1px 1px 4px var(--glass-shadow),1px 1px 3px var(--glass-glow);
+}
+.text-button, .add-toggle, .primary-button { height:34px; min-height:34px; padding:0 12px; border-radius:999px; gap:8px; font-size:13px; font-weight:600; transition: transform var(--motion-tool-hover); }
+.text-button:hover, .add-toggle:hover, .primary-button:hover { transform:scale(1.025); }
+.text-button:active, .add-toggle:active, .primary-button:active { transform:scale(1.06); transition:transform var(--motion-tool-press); }
+.icon-button { width:30px; height:30px; border-radius:50%; transition:transform var(--motion-icon-hover); }
+.icon-button:hover { transform:scale(1.05); }
+.icon-button:active { transform:scale(1.12); transition:transform var(--motion-icon-press); }
+.icon-button--quiet { border:0; background:transparent; box-shadow:none; }
+.liquid-text-segments { display:inline-flex; position:relative; flex-shrink:0; gap:2px; padding:4px; border-radius:999px; touch-action:none; user-select:none; }
+.liquid-text-segments button { position:relative; z-index:1; min-width:54px; height:28px; padding:0 2px; border:0; border-radius:999px; font-size:12px; font-weight:500; color:var(--muted); background:transparent; }
+.liquid-text-segments button[aria-checked="true"] { color:var(--text); font-weight:600; }
+.liquid-text-segments__selection { position:absolute; top:4px; left:var(--selection-left); width:var(--selection-width); height:28px; border-radius:999px; border:1px solid var(--glass-edge); background:linear-gradient(var(--glass-highlight),var(--glass-tail)),var(--glass-tint); box-shadow:1px 1px 4px var(--glass-shadow); transition:left var(--motion-segment-slide),width var(--motion-segment-slide); }
+.topn-segments__selection { transition:transform var(--motion-segment-slide); }
+.topn-segments button,.liquid-text-segments button { transition:transform var(--motion-segment-hover); }
+.topn-segments button:hover,.liquid-text-segments button:hover { transform:scale(1.04); }
+.topn-segments button:active,.liquid-text-segments button:active { transform:scale(1.10); transition:transform var(--motion-segment-press); }
+.liquid-text-segments button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.settings-window { padding:22px; }
+.settings-window > h1 { margin:0 0 16px; font-size:22px; font-weight:600; }
+.settings-window .panel-section { padding:0; border:0; }
+.settings-window .panel-section--settings > .add-toggle { display:none; }
+.settings-window .settings-panel { gap:16px; margin:0; padding:0; border:0; background:transparent; }
+.settings-preferences { display:flex; flex-direction:column; gap:14px; }
+.settings-preferences,.settings-window .settings-notifications,.settings-window .settings-actions { padding:16px; border-radius:16px; border:1px solid var(--line); background:var(--panel-soft); }
+.settings-window .settings-row { flex-wrap:nowrap; padding-bottom:14px; border-bottom:1px solid var(--line); gap:10px; }
+.settings-window .setting-title { font-size:15px; font-weight:600; }
+.settings-window .settings-row--toggle { flex-direction:column; align-items:flex-start; border-bottom:0; padding-bottom:0; gap:14px; }
+.setting-check { display:inline-flex; align-items:center; gap:6px; font-size:14px; cursor:pointer; }
+.setting-check input { width:16px; height:16px; margin:0; }
+.settings-window .settings-row--toggle .setting-copy { margin:0; }
+.settings-window .settings-actions { grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.json-file-controls { display:flex; gap:10px; flex-wrap:wrap; }
+.settings-window .settings-actions .json-file-controls { display:contents; }
+.json-file-controls .setting-message { grid-column:1 / -1; flex-basis:100%; }
+.task-index { border-radius:50%; }
+.settings-window .settings-actions button { font-size:12px; }
+.settings-notifications { padding:16px 0; }
+:root[data-theme="light"] .inline-edit { background:rgba(255,255,255,.72); }
+:root[data-theme="light"] .priority-menu,
+:root[data-theme="light"] .postpone-menu { background:var(--panel-strong); }
+/* The app window is always 372 logical pixels; mobile reflow was accidentally
+ * applied to every native panel and moved the right column below each task. */
+.panel-window .task-row { grid-template-columns:22px minmax(0,1fr) auto; gap:8px; }
+.panel-window .task-side { grid-column:auto; flex-direction:column; align-items:flex-end; width:auto; }
+.panel-window .task-actions { grid-column:2 / 4; }
+.panel-window .panel-section h1 { font-size:21px; }
+:root[data-low-power="true"] .liquid-text-segments button { transform:none !important; }

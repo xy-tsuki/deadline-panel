@@ -80,6 +80,18 @@ button {
 .panel-window {
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.panel-window--open-down {
+  justify-content: flex-start;
+}
+
+.panel-window > .expanded-panel {
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
 .collapsed-strip {
@@ -1080,3 +1092,55 @@ button.priority-pill {
     transition: none;
   }
 }
+
+/* Shared Windows compatibility surfaces; native desktop glass is a separate backend. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --desktop-a: #e8eef5;
+  --desktop-b: #f7f9fc;
+  --panel: rgba(241, 245, 250, 0.96);
+  --panel-strong: rgba(247, 249, 252, 0.98);
+  --panel-soft: rgba(0, 0, 0, 0.04);
+  --line: rgba(0, 0, 0, 0.10);
+  --line-strong: rgba(0, 0, 0, 0.16);
+  --text: #242a33;
+  --muted: #536171;
+  --subtle: #657281;
+  --accent: #2563a1;
+  --accent-strong: #174e88;
+  --warning: #8a5100;
+  --danger: #af2533;
+  --success: #28731d;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+.collapsed-strip, .expanded-panel { border-radius: 14px; }
+.quick-preview .quick-preview-notes { font-size:12px; font-weight:400; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+.collapsed-strip { background: var(--panel-strong); color: var(--text); font-size: 14px; font-weight: 500; }
+:root[data-low-power="true"] *,
+:root[data-low-power="true"] *::before,
+:root[data-low-power="true"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+:root[data-low-power="true"] button { transform: none !important; scale: 1 !important; }
+.settings-window { height: 100vh; overflow: auto; padding: 14px; background: var(--panel-strong); }
+.settings-window .panel-section { max-width: 860px; margin: 0 auto; }
+.settings-window .settings-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.settings-window .settings-actions button { width: 100%; white-space: normal; }
+.settings-window .settings-row { flex-wrap: wrap; }
+.task-note-button { display: block; padding: 0; border: 0; background: transparent; color: var(--muted); text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.task-note-button:hover { color: var(--text); }
+.switch input { width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch span { pointer-events: none; }
+.topn-segments { position: relative; display: inline-flex; flex: 0 0 auto; gap: 2px; padding: 4px; border-radius: 999px; border: 1px solid var(--line-strong); background: linear-gradient(rgba(255,255,255,.20),rgba(255,255,255,.06)),var(--panel-soft); touch-action: none; user-select: none; }
+.topn-segments button { position: relative; z-index: 1; width: 48px; height: 28px; padding: 0; border: 0; border-radius: 999px; font-size: 12px; font-weight: 500; background: transparent; color: var(--muted); transition: transform 180ms cubic-bezier(.34,1.56,.64,1); }
+.topn-segments button[aria-checked="true"] { color: var(--text); font-weight: 600; }
+.topn-segments button:hover { transform: scale(1.04); }
+.topn-segments button:active { transform: scale(1.10); }
+.topn-segments button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.topn-segments__selection { position: absolute; left: 4px; top: 4px; width: 48px; height: 28px; border-radius: 999px; border: 1px solid rgba(255,255,255,.36); background: linear-gradient(rgba(255,255,255,.34),rgba(255,255,255,.10)),var(--panel-soft); box-shadow: 1px 1px 4px rgba(0,0,0,.16); transform: translateX(calc(var(--segment-index) * 50px)); transition: transform 280ms cubic-bezier(.34,1.56,.64,1); }
+:root[data-theme="dark"] .topn-segments__selection { border-color: rgba(255,255,255,.24); background: linear-gradient(rgba(255,255,255,.20),rgba(255,255,255,.06)),var(--panel-soft); box-shadow: 1px 1px 4px rgba(0,0,0,.28); }
+:root[data-theme="light"] .priority-pill--urgent { --priority-text: #a32632; }
+:root[data-theme="light"] .priority-pill--high { --priority-text: #875014; }
+:root[data-theme="light"] .priority-pill--low { --priority-text: #346b2c; }
