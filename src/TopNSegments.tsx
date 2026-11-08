@@ -7,7 +7,11 @@ export function TopNSegments({ value, label, onChange }: { value: FocusLimit; la
   const current = useRef(value);
   const selected = draft ?? value;
   const choose = (event: PointerEvent<HTMLDivElement>) => {
-    const x = event.clientX - event.currentTarget.getBoundingClientRect().left - 4;
+    // 设置页可能被 transform 整体缩小；把指针位置换算回未缩放坐标，再按每格 50px 计算
+    const node = event.currentTarget;
+    const bounds = node.getBoundingClientRect();
+    const scale = node.offsetWidth > 0 ? bounds.width / node.offsetWidth : 1;
+    const x = (event.clientX - bounds.left) / (scale || 1) - 4;
     const index = Math.max(0, Math.min(values.length - 1, Math.floor(x / 50)));
     current.current = values[index]; setDraft(values[index]);
   };

@@ -24,7 +24,10 @@ export function LiquidTextSegments<T extends string>({ value, options, label, on
   const commit = async (next: T) => { try { await onChange(next); } finally { setDraft(null); } };
   const choose = (clientX: number) => {
     const node = root.current!;
-    const x = clientX - node.getBoundingClientRect().left;
+    // getBoundingClientRect 含祖先的 transform 缩放（设置页会整体缩小），offset* 不含，先换算回未缩放坐标
+    const bounds = node.getBoundingClientRect();
+    const scale = node.offsetWidth > 0 ? bounds.width / node.offsetWidth : 1;
+    const x = (clientX - bounds.left) / (scale || 1);
     const buttons = [...node.querySelectorAll("button")];
     const index = buttons.findIndex(button => x < button.offsetLeft + button.offsetWidth);
     pending.current = options[index < 0 ? options.length - 1 : index].value;
