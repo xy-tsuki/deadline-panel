@@ -50,6 +50,7 @@ Requires Node.js and Rust (see the [Tauri prerequisites](https://v2.tauri.app/st
 ```bash
 npm install
 npm run tauri:dev   # run the desktop app in development mode
+npm test            # run tests
 npm run tauri:build # build a release
 ```
 

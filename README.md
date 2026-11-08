@@ -50,6 +50,7 @@ Deadline Panel 仅通过常驻提示，让你在使用电脑时，时刻都不�
 ```bash
 npm install
 npm run tauri:dev   # 启动桌面应用（开发模式）
+npm test            # 运行测试
 npm run tauri:build # 打包发布版本
 ```
 
