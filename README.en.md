@@ -74,7 +74,7 @@ Steps:
 2. Copy the sync code.
 3. Paste the same sync code on another device.
 4. Click "Sync Now" to perform the first merged sync.
-5. Advanced users can also use their own Supabase project.
+5. Advanced users can also use their own Supabase project: run [`supabase/schema.sql`](supabase/schema.sql) in the SQL Editor. When upgrading from 0.5.x or earlier to 0.6.2, run the file again (existing data is kept); otherwise sync will fail.
 
 ## Tech Stack
 

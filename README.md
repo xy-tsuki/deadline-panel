@@ -73,7 +73,7 @@ npm run tauri:build # 打包发布版本
 2. 复制同步码。
 3. 在另一台设备粘贴同一个同步码。
 4. 点击“立即同步”进行首次合并同步。
-5. 高级用户也可使用自己的 Supabase 项目。
+5. 高级用户也可使用自己的 Supabase 项目：在 SQL Editor 里执行 [`supabase/schema.sql`](supabase/schema.sql)。从 0.5.x 及更早版本升级到 0.6.2 时，需要把这个文件重新执行一遍（会保留已有数据），否则同步会失败。
 
 ## 技术栈
 
